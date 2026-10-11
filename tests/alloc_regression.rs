@@ -1,36 +1,60 @@
 //! Allocation regression tests.
 //!
 //! Asserts zero (or bounded) heap allocations on the keystroke hot path.
-//! Uses a counting `GlobalAlloc` wrapper with a capture gate so that only
-//! allocations inside the measured block are counted.
+//! Uses a counting `GlobalAlloc` wrapper with a per-thread capture gate so
+//! that only allocations on the measuring thread inside the measured block
+//! are counted.
 //!
-//! Run in isolation to avoid cross-test allocation noise:
+//! Run in isolation to avoid cross-test timing noise:
 //! ```sh
 //! cargo test --test alloc_regression -- --test-threads=1
 //! ```
-//! (Tests are also `#[serial]` so they self-serialize under multi-thread runs.)
+//! (Tests are also `#[serial]` so they self-serialize under multi-thread runs.
+//! `#[serial]` alone cannot silence background harness threads, which is why
+//! the counters below are thread-local rather than global.)
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::cell::Cell;
 
 use bamboo_core::{Engine, InputMethodPreset, Mode, OutputOptions, RestoreMark};
 use serial_test::serial;
 use std::borrow::Cow;
 use std::hint::black_box;
 
-/// Thread-safe counting allocator wrapping the system allocator.
+/// Counting allocator wrapping the system allocator.
+///
+/// Counters are thread-local: a global flag would also count allocations
+/// from other threads (e.g. libtest harness workers) running concurrently
+/// with the measurement, making counts flaky under default `--test-threads`.
 struct CountingAlloc;
 
-static CAPTURING: AtomicBool = AtomicBool::new(false);
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-static ALLOC_BYTES: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static TL_CAPTURING: Cell<bool> = const { Cell::new(false) };
+    static TL_ALLOC_COUNT: Cell<usize> = const { Cell::new(0) };
+    static TL_ALLOC_BYTES: Cell<usize> = const { Cell::new(0) };
+}
+
+#[inline]
+fn is_capturing() -> bool {
+    // `unwrap_or(false)` covers two cases: TLS destroyed during thread
+    // shutdown, and re-entrant access while TLS is being initialized
+    // (that init itself can go through `GlobalAlloc`).
+    TL_CAPTURING.try_with(|c| c.get()).unwrap_or(false)
+}
+
+#[inline]
+fn count_alloc(size: usize) {
+    if !is_capturing() {
+        return;
+    }
+    // Ignore errors: thread is shutting down, nothing left to measure.
+    let _ = TL_ALLOC_COUNT.try_with(|c| c.set(c.get().wrapping_add(1)));
+    let _ = TL_ALLOC_BYTES.try_with(|c| c.set(c.get().wrapping_add(size)));
+}
 
 unsafe impl GlobalAlloc for CountingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if CAPTURING.load(Ordering::Relaxed) {
-            ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-            ALLOC_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
-        }
+        count_alloc(layout.size());
         unsafe { System.alloc(layout) }
     }
 
@@ -39,10 +63,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if CAPTURING.load(Ordering::Relaxed) {
-            ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-            ALLOC_BYTES.fetch_add(new_size, Ordering::Relaxed);
-        }
+        count_alloc(new_size);
         unsafe { System.realloc(ptr, layout, new_size) }
     }
 }
@@ -51,13 +72,32 @@ unsafe impl GlobalAlloc for CountingAlloc {
 static GLOBAL: CountingAlloc = CountingAlloc;
 
 /// Returns `(alloc_count, alloc_bytes)` deltas while running `f`.
+///
+/// Only counts allocations made on the calling thread.
 fn measure_allocs<F: FnOnce()>(f: F) -> (usize, usize) {
-    ALLOC_COUNT.store(0, Ordering::Relaxed);
-    ALLOC_BYTES.store(0, Ordering::Relaxed);
-    CAPTURING.store(true, Ordering::Relaxed);
+    // Force TLS initialization outside the capture window so the init itself
+    // is neither counted nor recurses into the allocator mid-measurement.
+    let _ = TL_CAPTURING.try_with(|_| {});
+    let _ = TL_ALLOC_COUNT.try_with(|_| {});
+    let _ = TL_ALLOC_BYTES.try_with(|_| {});
+
+    TL_ALLOC_COUNT.try_with(|c| c.set(0)).ok();
+    TL_ALLOC_BYTES.try_with(|c| c.set(0)).ok();
+    TL_CAPTURING.try_with(|c| c.set(true)).ok();
+    // Guarantees the gate is closed on panic (unwind) as well as on success.
+    // Under `panic = "abort"` (release profile) this is best-effort only.
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            let _ = TL_CAPTURING.try_with(|c| c.set(false));
+        }
+    }
+    let _guard = Guard;
     f();
-    CAPTURING.store(false, Ordering::Relaxed);
-    (ALLOC_COUNT.load(Ordering::Relaxed), ALLOC_BYTES.load(Ordering::Relaxed))
+    let _ = TL_CAPTURING.try_with(|c| c.set(false));
+    let n = TL_ALLOC_COUNT.try_with(|c| c.get()).unwrap_or(0);
+    let b = TL_ALLOC_BYTES.try_with(|c| c.get()).unwrap_or(0);
+    (n, b)
 }
 
 fn warm_telex() -> Engine {
