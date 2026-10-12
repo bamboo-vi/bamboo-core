@@ -13,7 +13,7 @@
 //! - **Orthographic Validation**: Built-in Vietnamese consonant-vowel-consonant (CVC) phonotactic
 //!   verification prevents creating invalid Vietnamese words.
 //! - **Deterministic Finite Automaton (DFA) Cache**: Pre-compiled common syllable transitions
-//!   with SIMD-within-a-register (SWAR) parallel matching.
+//!   with branchless popcount-rank lookup over single-cache-line states.
 //! - **Rich Deletion Semantics**: Comprehensive support for both character-level and grapheme-level
 //!   backspace undoing.
 //!
@@ -36,6 +36,19 @@
 //!
 //! assert_eq!(engine.output(), "tiếng");
 //! ```
+//!
+//! ## API Selection Guide
+//!
+//! | Use Case | Primary API | Description |
+//! |---|---|---|
+//! | **IME Frontend (Fcitx5 / `IBus` / Native)** | [`Engine::process_key`], [`Engine::output`] | Feeds keys one-by-one, updates internal buffer, queries current composition word |
+//! | **Text Editor / Terminal / IDE** | [`Engine::process_key_delta`] | Returns a 3-way diff `(backspaces, bytes, inserted)` to replace only changed suffixes |
+//! | **Keystroke-level Backspace** | [`Engine::remove_last_char`] | $O(1)$ undo of the last physical keypress using stack snapshots |
+//! | **Grapheme-level Backspace** | [`Engine::remove_last_output_char`] | Deletes preceding character while retaining marks/tones on remaining vowels (e.g. `tiếng` $\rightarrow$ `tiến`) |
+//! | **Word Finalization** | [`Engine::commit`] | Clears composing state and appends text to committed stream |
+//! | **Batch / Convenience (Testing)** | [`Engine::process`] | Processes a full string and returns output (**convenience only, not for real-time IME**) |
+//! | **Inline Word Repair** | [`Engine::rebuild_from_text`] | Loads existing text (e.g. the word before the cursor) as if typed, so tone/mark/backspace edit it |
+//! | **Charset Conversion** | [`advanced::encode`] | Converts Unicode strings to legacy encodings (TCVN3, VNI, etc.) |
 //!
 //! ## Architecture Overview
 //!
