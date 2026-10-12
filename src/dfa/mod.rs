@@ -81,11 +81,21 @@ impl Default for State {
 }
 
 impl State {
-    /// Performs a fast transition lookup on an ASCII key using bitset check + SWAR parallel search.
+    /// Performs a fast transition lookup on an ASCII key using bitset check +
+    /// a branchless 16-lane SWAR scan.
     ///
-    /// The algorithm runs in constant time without branches for typical keys:
-    /// 1. $O(1)$ rejection via the 128-bit bitset (1 bit per ASCII code).
-    /// 2. If present, SWAR (SIMD Within A Register) compares 8 keys at once using 64-bit integers.
+    /// The algorithm runs in constant time without data-dependent branches:
+    /// 1. $O(1)$ rejection via the 128-bit bitset (1 bit per ASCII code),
+    ///    folded into the result as a 0/1 multiplier instead of an early return.
+    /// 2. SWAR (SIMD Within A Register) compares all 16 key lanes in one
+    ///    `u128` pass using the classic `haszero` trick (Hacker's Delight 6-1).
+    ///
+    /// `haszero` invariant: the subtraction borrows across lanes, so a `0x01`
+    /// lane sitting above a zero lane can light its high bit too (false
+    /// positive). Any such false positive has a genuine zero lane *below* it
+    /// (borrow flows low to high, and lane 0 has no borrow-in), so
+    /// `trailing_zeros` always lands on a genuine match and `m != 0` iff a
+    /// genuine match exists.
     ///
     /// # Arguments
     /// * `key` - The ASCII byte of the key to look up (0..127).
@@ -94,57 +104,24 @@ impl State {
     /// The destination state ID (non-zero), or `0` if no transition exists.
     #[inline]
     pub const fn get_transition(&self, key: u8) -> u32 {
-        // O(1) rejection: if the bit is not set, no transition exists.
+        debug_assert!(key < 128);
         let idx = key as usize;
-        if self.bitset[idx / 64] & (1u64 << (idx % 64)) == 0 {
-            return 0;
-        }
 
-        let broadcast = (key as u64) * 0x0101010101010101;
+        // O(1) bitset hit as a 0/1 multiplier — no early return.
+        let bitset_hit = ((self.bitset[idx / 64] >> (idx % 64)) & 1) as u32;
 
-        // Check chunk 0 (keys 0..8) using safe byte slice loading
-        let c0 = u64::from_le_bytes([
-            self.trans_keys[0],
-            self.trans_keys[1],
-            self.trans_keys[2],
-            self.trans_keys[3],
-            self.trans_keys[4],
-            self.trans_keys[5],
-            self.trans_keys[6],
-            self.trans_keys[7],
-        ]);
-        let v0 = c0 ^ broadcast;
-        let m0 = v0.wrapping_sub(0x0101010101010101) & !v0 & 0x8080808080808080;
-        if m0 != 0 {
-            let offset = (m0.trailing_zeros() / 8) as usize;
-            if offset < self.trans_len as usize {
-                return self.trans_states[offset] as u32;
-            }
-        }
+        // 16-lane broadcast compare in one u128 pass.
+        const REP: u128 = 0x0101_0101_0101_0101_0101_0101_0101_0101;
+        const MSB: u128 = 0x8080_8080_8080_8080_8080_8080_8080_8080;
+        let keys = u128::from_le_bytes(self.trans_keys);
+        let v = keys ^ (key as u128).wrapping_mul(REP);
+        let m = v.wrapping_sub(REP) & !v & MSB;
 
-        // Check chunk 1 (keys 8..16)
-        if self.trans_len > 8 {
-            let c1 = u64::from_le_bytes([
-                self.trans_keys[8],
-                self.trans_keys[9],
-                self.trans_keys[10],
-                self.trans_keys[11],
-                self.trans_keys[12],
-                self.trans_keys[13],
-                self.trans_keys[14],
-                self.trans_keys[15],
-            ]);
-            let v1 = c1 ^ broadcast;
-            let m1 = v1.wrapping_sub(0x0101010101010101) & !v1 & 0x8080808080808080;
-            if m1 != 0 {
-                let offset = 8 + (m1.trailing_zeros() / 8) as usize;
-                if offset < self.trans_len as usize {
-                    return self.trans_states[offset] as u32;
-                }
-            }
-        }
-
-        0
+        // Miss → trailing_zeros() == 128 → off masked to 0; the zero hit
+        // multiplier then yields 0 regardless of the lane-0 slot content.
+        let off = ((m.trailing_zeros() >> 3) as usize) & 15;
+        let hit = bitset_hit & (m != 0) as u32;
+        self.trans_states[off] as u32 * hit
     }
 
     /// Sets or updates a transition from this state on a given key.
@@ -672,5 +649,44 @@ mod tests {
         let mut other_target = lower;
         other_target[1].set_target(Some(0));
         assert!(!dfa.composition_matches_canonical(id, &other_target));
+    }
+
+    /// Characterization: `get_transition` semantics across every lane of the
+    /// 16-key scan (lanes 0, 7, 8, 15 are the old two-chunk boundaries) plus
+    /// miss cases. Pins behavior before the branchless rewrite.
+    #[test]
+    fn get_transition_all_lanes_and_misses() {
+        let mut state = State::default();
+
+        // Empty state: any key misses.
+        assert_eq!(state.get_transition(b'a'), 0);
+        assert_eq!(state.get_transition(0), 0);
+
+        // Fill all 16 lanes with distinct destinations (keys 'a'..='p').
+        for i in 0..16u32 {
+            state.set_transition(b'a' + i as u8, 100 + i);
+        }
+
+        // Every lane hits with its own destination, including the old
+        // chunk boundaries (lane 0, 7, 8) and the last lane (15).
+        for i in 0..16u32 {
+            assert_eq!(state.get_transition(b'a' + i as u8), 100 + i, "lane {i}");
+        }
+
+        // Absent keys miss: before range, between range and tail, after range.
+        assert_eq!(state.get_transition(b'`'), 0);
+        assert_eq!(state.get_transition(b'q'), 0);
+        assert_eq!(state.get_transition(b'z'), 0);
+
+        // Single-transition states at lane 0 and lane 15.
+        let mut lane0 = State::default();
+        lane0.set_transition(b'a', 7);
+        assert_eq!(lane0.get_transition(b'a'), 7);
+        assert_eq!(lane0.get_transition(b'b'), 0);
+
+        let mut lane15 = State::default();
+        lane15.set_transition(b'p', 9);
+        assert_eq!(lane15.get_transition(b'p'), 9);
+        assert_eq!(lane15.get_transition(b'o'), 0);
     }
 }
