@@ -213,6 +213,13 @@ pub(crate) struct Cvc {
     pub lc: [Transformation; 8],
     /// Number of transformations in `lc`.
     pub lc_len: u8,
+    /// Absolute composition indices of the appending vowels (the `vo` split
+    /// subset), in order. Locates vowels without value search, which mis-hits
+    /// on identical twins (e.g. the second 'i' of "gii" after the gi-split
+    /// moves the first into the onset).
+    pub vo_abs: [u8; MAX_ACTIVE_TRANS],
+    /// Number of indices in `vo_abs`.
+    pub vo_abs_len: u8,
 }
 
 impl Cvc {
@@ -270,25 +277,17 @@ fn find_tone_target(composition: &[Transformation], cvc: &Cvc, std_style: bool) 
     let vowels = cvc.vo_slice();
     let lc = cvc.lc_slice();
 
-    // Absolute indices of appending vowel letters. Comparing Transformation
-    // values is wrong when two vowels are identical (e.g. literal "oo").
-    let mut app_abs = [0usize; MAX_ACTIVE_TRANS];
-    let mut app_len = 0usize;
-    for (i, t) in composition.iter().enumerate() {
-        if !t.has_target() {
-            app_abs[app_len] = i;
-            app_len += 1;
-        }
-    }
-    let (_fc_idxs, vo_idxs, _lc_idxs) =
-        extract_cvc_appending_indices(composition, &app_abs[..app_len]);
-    let appending_vowels_len = vo_idxs.len();
+    // Absolute indices of the appending vowels, collected once by
+    // `extract_cvc_trans`. Index-based: comparing Transformation values is
+    // wrong when two vowels are identical (e.g. literal "oo").
+    let vo_abs = &cvc.vo_abs[..cvc.vo_abs_len as usize];
+    let appending_vowels_len = vo_abs.len();
     if appending_vowels_len == 0 {
         return None;
     }
 
     if appending_vowels_len == 1 {
-        return Some(vo_idxs[0] as u8);
+        return Some(vo_abs[0]);
     }
 
     if appending_vowels_len == 2 && std_style {
@@ -301,34 +300,30 @@ fn find_tone_target(composition: &[Transformation], cvc: &Cvc, std_style: bool) 
                 (fc.len() == 2 && fc[0].key == 't' && fc[1].key == 'h')
                     || (fc.len() == 1 && fc[0].key == 'h')
             };
-            target = Some(if !lc.is_empty() || is_th_or_h {
-                vo_idxs[1] as u8
-            } else {
-                vo_idxs[0] as u8
-            });
+            target = Some(if !lc.is_empty() || is_th_or_h { vo_abs[1] } else { vo_abs[0] });
         } else {
             // Use the *resolved* base char so a cancelled mark chain (e.g. "ooo"
             // undoing "oo"→"ô" on the first "o") does not steal the tone target.
-            for &abs in vo_idxs.iter() {
-                let base = add_tone_to_char(resolve_appended_char(composition, abs), 0);
+            for &abs in vo_abs {
+                let base = add_tone_to_char(resolve_appended_char(composition, abs as usize), 0);
                 if matches!(base, 'ơ' | 'ê' | 'ô' | 'â' | 'ă') {
-                    target = Some(abs as u8);
+                    target = Some(abs);
                 }
             }
         }
         if target.is_none() {
-            target = Some(if !lc.is_empty() { vo_idxs[1] as u8 } else { vo_idxs[0] as u8 });
+            target = Some(if !lc.is_empty() { vo_abs[1] } else { vo_abs[0] });
         }
         return target;
     }
 
     if appending_vowels_len == 2 {
         if !lc.is_empty() {
-            return Some(vo_idxs[1] as u8);
+            return Some(vo_abs[1]);
         }
 
         // Compare raw key chars directly — no heap allocation needed.
-        let app_vowels = [composition[vo_idxs[0]], composition[vo_idxs[1]]];
+        let app_vowels = [composition[vo_abs[0] as usize], composition[vo_abs[1] as usize]];
         let mut raw = ['\0'; 4];
         let raw_len = raw_keys_of(&app_vowels, &mut raw);
         let tone_on_second = raw_len == 2
@@ -336,16 +331,19 @@ fn find_tone_target(composition: &[Transformation], cvc: &Cvc, std_style: bool) 
                 (raw[0], raw[1]),
                 ('o', 'a') | ('o', 'e') | ('u', 'y') | ('u', 'e') | ('u', 'o')
             );
-        return Some(if tone_on_second { vo_idxs[1] as u8 } else { vo_idxs[0] as u8 });
+        return Some(if tone_on_second { vo_abs[1] } else { vo_abs[0] });
     }
 
     if appending_vowels_len == 3 {
-        let app_vowels =
-            [composition[vo_idxs[0]], composition[vo_idxs[1]], composition[vo_idxs[2]]];
+        let app_vowels = [
+            composition[vo_abs[0] as usize],
+            composition[vo_abs[1] as usize],
+            composition[vo_abs[2] as usize],
+        ];
         let mut raw = ['\0'; 4];
         let raw_len = raw_keys_of(&app_vowels, &mut raw);
         let is_uye = raw_len == 3 && raw[0] == 'u' && raw[1] == 'y' && raw[2] == 'e';
-        return Some(if is_uye { vo_idxs[2] as u8 } else { vo_idxs[1] as u8 });
+        return Some(if is_uye { vo_abs[2] } else { vo_abs[1] });
     }
 
     None
@@ -438,7 +436,7 @@ fn extract_cvc_appending_indices<'a>(
     (fc_final, vo_final, lc)
 }
 
-fn extract_cvc_trans(composition: &[Transformation]) -> Cvc {
+pub(crate) fn extract_cvc_trans(composition: &[Transformation]) -> Cvc {
     let mut app_indices = [0usize; MAX_ACTIVE_TRANS];
     let mut app_len = 0usize;
     for (i, t) in composition.iter().enumerate() {
@@ -452,6 +450,16 @@ fn extract_cvc_trans(composition: &[Transformation]) -> Cvc {
         extract_cvc_appending_indices(composition, &app_indices[..app_len]);
 
     let mut res = Cvc::default();
+
+    // Record the absolute vowel indices for index-based (not value-based)
+    // vowel location by callers.
+    for (k, &abs) in vo_idxs.iter().enumerate() {
+        if k < res.vo_abs.len() {
+            debug_assert!(abs < MAX_ACTIVE_TRANS);
+            res.vo_abs[k] = abs as u8;
+            res.vo_abs_len += 1;
+        }
+    }
 
     for &i in fc_idxs {
         if (res.fc_len as usize) < res.fc.len() {
@@ -779,8 +787,9 @@ pub(crate) fn find_target(
     composition: &[Transformation],
     applicable_rules: &[Rule],
     config: Config,
+    cvc: &Cvc,
 ) -> (Option<u8>, Option<Rule>) {
-    find_target_excluding(composition, applicable_rules, config, None)
+    find_target_excluding(composition, applicable_rules, config, None, cvc)
 }
 
 /// Finds the target excluding a specific target index (e.g. for companion vowel in dual transformations).
@@ -789,8 +798,8 @@ pub(crate) fn find_target_excluding(
     applicable_rules: &[Rule],
     config: Config,
     exclude_target: Option<u8>,
+    cvc: &Cvc,
 ) -> (Option<u8>, Option<Rule>) {
-    let cvc = extract_cvc_trans(composition);
     for applicable_rule in applicable_rules {
         if applicable_rule.effect_type != EffectType::ToneTransformation {
             continue;
@@ -799,8 +808,8 @@ pub(crate) fn find_target_excluding(
         let mut target: Option<u8> = None;
         if config.free_tone_marking {
             let tone = applicable_rule.get_tone();
-            if has_valid_tone(composition, &cvc, tone) {
-                target = find_tone_target(composition, &cvc, config.std_tone_style);
+            if has_valid_tone(composition, cvc, tone) {
+                target = find_tone_target(composition, cvc, config.std_tone_style);
             }
         } else if let Some((idx, last_appending)) = find_last_appending_entry(composition)
             && is_vowel(last_appending.effect_on)
@@ -838,15 +847,15 @@ fn generate_undo_transformations(
     rules: &[Rule],
     config: Config,
     out: &mut TransformationStack,
+    cvc: &Cvc,
 ) {
-    let cvc = extract_cvc_trans(composition);
     for rule in rules {
         if rule.effect_type == EffectType::ToneTransformation {
             let mut target: Option<u8> = None;
             if config.free_tone_marking {
                 let tone = rule.get_tone();
-                if has_valid_tone(composition, &cvc, tone) {
-                    target = find_tone_target(composition, &cvc, config.std_tone_style);
+                if has_valid_tone(composition, cvc, tone) {
+                    target = find_tone_target(composition, cvc, config.std_tone_style);
                 }
             } else if let Some((idx, last_appending)) = find_last_appending_entry(composition)
                 && is_vowel(last_appending.effect_on)
@@ -1019,8 +1028,12 @@ pub(crate) fn generate_transformations(
         ));
     }
 
+    // Single split per composition revision: threaded through every query
+    // below instead of re-extracting per call.
+    let cvc = extract_cvc_trans(composition);
+
     if let (Some(target), Some(applicable_rule)) =
-        find_target(composition, applicable_rules, config)
+        find_target(composition, applicable_rules, config, &cvc)
     {
         out.push(Transformation::from_rule(applicable_rule, Some(target), is_upper_case));
 
@@ -1057,9 +1070,12 @@ pub(crate) fn generate_transformations(
 
             // Only spread the mark when the syllable is incomplete without it:
             // "khuơ" stays as typed, while "huơu" needs the second horn.
+            // `new_comp` is a new revision, so it gets its own split.
             if !is_valid(&new_comp[..new_len], true)
-                && let (Some(target2), Some(mut virtual_rule)) =
-                    find_target(&new_comp[..new_len], applicable_rules, config)
+                && let (Some(target2), Some(mut virtual_rule)) = {
+                    let new_cvc = extract_cvc_trans(&new_comp[..new_len]);
+                    find_target(&new_comp[..new_len], applicable_rules, config, &new_cvc)
+                }
             {
                 virtual_rule.key = '\0';
                 out.push(Transformation::from_rule(virtual_rule, Some(target2), false));
@@ -1067,24 +1083,16 @@ pub(crate) fn generate_transformations(
         }
     } else {
         if contains_uho_in_composition(composition) {
-            let cvc = extract_cvc_trans(composition);
-            let vowels = cvc.vo_slice();
-            let mut app_vowels = [Transformation::default(); 8];
-            let mut app_vowels_len = 0usize;
-            for t in vowels {
-                if !t.has_target() {
-                    app_vowels[app_vowels_len] = *t;
-                    app_vowels_len += 1;
-                }
-            }
-
-            if app_vowels_len > 0 {
-                let target_idx = composition.iter().position(|t| *t == app_vowels[0]);
+            // Absolute index of the first appending vowel, collected by the
+            // entry split. A value search here mis-hits on identical twins
+            // (e.g. the fc 'i' shadows vo's 'i' in "gii...").
+            let vo_abs = &cvc.vo_abs[..cvc.vo_abs_len as usize];
+            if let Some(&target_idx) = vo_abs.first() {
                 let trans = Transformation::new(
                     '\0',
                     '\0',
                     '\0',
-                    target_idx.map(|v| v as u8),
+                    Some(target_idx),
                     0,
                     EffectType::MarkTransformation,
                     false,
@@ -1098,9 +1106,11 @@ pub(crate) fn generate_transformations(
                     tmp[..base_len].copy_from_slice(composition);
                     tmp[base_len] = trans;
 
-                    if let (Some(target), Some(applicable_rule)) =
-                        find_target(&tmp[..tmp_len], applicable_rules, config)
-                        && target_idx.map(|v| v as u8) != Some(target)
+                    // `tmp` is a new revision, so it gets its own split.
+                    if let (Some(target), Some(applicable_rule)) = {
+                        let tmp_cvc = extract_cvc_trans(&tmp[..tmp_len]);
+                        find_target(&tmp[..tmp_len], applicable_rules, config, &tmp_cvc)
+                    } && target_idx != target
                     {
                         out.push(trans);
                         out.push(Transformation::from_rule(
@@ -1114,7 +1124,7 @@ pub(crate) fn generate_transformations(
             }
         }
 
-        generate_undo_transformations(composition, applicable_rules, config, out);
+        generate_undo_transformations(composition, applicable_rules, config, out, &cvc);
         if !out.is_empty() {
             let has_raw_cancel = out.as_slice().iter().any(|t| {
                 t.effect_type == EffectType::MarkTransformation && t.effect == Mark::Raw as u8
@@ -1242,6 +1252,84 @@ mod tests {
             EffectType::MarkTransformation,
             false,
         )
+    }
+
+    /// `Cvc.vo_abs` pins the absolute composition indices of the appending
+    /// vowels, in vo order. "giiưo": the gi-split moves the first 'i' into
+    /// fc, so vo = [i#2, ư#3, o#4] — a value search for vo[0] mis-hits the
+    /// fc twin at index 1, while the collected index is 2.
+    #[test]
+    fn cvc_vo_abs_indices() {
+        let comp = [appending('g'), appending('i'), appending('i'), appending('ư'), appending('o')];
+        let cvc = extract_cvc_trans(&comp);
+        assert_eq!(&cvc.vo_abs[..cvc.vo_abs_len as usize], &[2u8, 3, 4]);
+        // Structural invariant: vo_abs[i] indexes the vowel equal to vo[i].
+        for (k, &abs) in cvc.vo_abs[..cvc.vo_abs_len as usize].iter().enumerate() {
+            assert_eq!(comp[abs as usize], cvc.vo_slice()[k]);
+        }
+
+        // Real mobile shapes (precomposed ư): no twins, indices are direct.
+        let comp2 = [appending('g'), appending('ư'), appending('o')];
+        let cvc2 = extract_cvc_trans(&comp2);
+        assert_eq!(&cvc2.vo_abs[..cvc2.vo_abs_len as usize], &[1u8, 2]);
+
+        let comp3 = [appending('r'), appending('ư'), appending('ợ')];
+        let cvc3 = extract_cvc_trans(&comp3);
+        assert_eq!(&cvc3.vo_abs[..cvc3.vo_abs_len as usize], &[1u8, 2]);
+    }
+
+    /// Revision discipline: the threaded `&Cvc` must never cross a composition
+    /// revision. `generate_transformations` (revision A) and `apply_auto_correct`
+    /// (revision B, post-transform) each use their own split. Pinned through
+    /// the public engine on sequences whose tone/mark placement depends on
+    /// per-revision validity: "uwfw" keeps the tone (`ùw`), and "eete" +
+    /// backspace + "e" rebuilds the mark (`êt`).
+    #[test]
+    fn cvc_shared_within_single_revision_only() {
+        use crate::engine::Engine;
+        use crate::input_method::preset::InputMethodPreset;
+        use crate::mode::Mode;
+        let mut e = Engine::from_preset(InputMethodPreset::Telex);
+        for ch in "uwfw".chars() {
+            e.process_key(ch, Mode::Vietnamese);
+        }
+        assert_eq!(e.output_str(), "ùw");
+
+        let mut e2 = Engine::from_preset(InputMethodPreset::Telex);
+        for ch in "eete".chars() {
+            e2.process_key(ch, Mode::Vietnamese);
+        }
+        e2.remove_last_output_char();
+        e2.process_key('e', Mode::Vietnamese);
+        assert_eq!(e2.output_str(), "êt");
+    }
+
+    /// Ground truth: real Vietnamese ư-words typed with precomposed ư/ơ
+    /// (mobile VN keyboards send these raw). This is the only input shape
+    /// reaching the uho horn fallback with pre-resolved results; it must
+    /// keep producing the exact words through the Cvc refactor.
+    #[test]
+    fn mobile_precomposed_uo_words() {
+        use crate::engine::Engine;
+        use crate::input_method::preset::InputMethodPreset;
+        use crate::mode::Mode;
+        let cases = [
+            ("rượu", "rượu"),
+            ("ngươi", "ngươi"),
+            ("gương", "gương"),
+            ("đường", "đường"),
+            ("bươu", "bươu"),
+            ("sườn", "sườn"),
+            ("vươn", "vươn"),
+            ("thương", "thương"),
+        ];
+        for (input, expected) in cases {
+            let mut e = Engine::from_preset(InputMethodPreset::Telex);
+            for ch in input.chars() {
+                e.process_key(ch, Mode::Vietnamese);
+            }
+            assert_eq!(e.output_str(), expected, "mobile input {input:?}");
+        }
     }
 
     /// Regression: `results[fc[0]]` / `results[vo[0]]` indexed `results[]` by

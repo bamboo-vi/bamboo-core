@@ -478,10 +478,12 @@ impl Engine {
         tmp_data[composition.len()..combined_len].copy_from_slice(trans_buf.as_slice());
 
         if crate::syllable::uho_tail_match_composition(&tmp_data[..combined_len]) {
+            let tmp_cvc = crate::syllable::extract_cvc_trans(&tmp_data[..combined_len]);
             let (target, rule) = crate::syllable::find_target(
                 &tmp_data[..combined_len],
                 self.get_applicable_rules(self.input_method.super_keys[0]),
                 self.config,
+                &tmp_cvc,
             );
             if let (Some(target), Some(mut rule)) = (target, rule) {
                 rule.key = '\0';
