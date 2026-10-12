@@ -4,16 +4,14 @@
 type Token = ([char; 4], u8);
 
 /// Strips diacritic marks from a character (mark 0 = canonical base).
-/// Used in the innermost token-match loop — must be faster than a PHF lookup.
+/// Used in the innermost token-match loop — one decode-table load.
+/// Only the 7 bare marked chars strip; toned variants (e.g. 'ầ') and
+/// everything else are identity.
 #[inline(always)]
 const fn strip_mark(c: char) -> char {
-    match c {
-        'ă' | 'â' => 'a',
-        'ê' => 'e',
-        'ô' | 'ơ' => 'o',
-        'ư' => 'u',
-        'đ' => 'd',
-        _ => c,
+    match crate::phonetics::mark_root(c) {
+        Some(root) => root,
+        None => c,
     }
 }
 
@@ -353,6 +351,36 @@ mod tests {
         assert!(is_valid_cvc("", "a", "n", true));
         assert!(is_valid_cvc("", "e", "m", true));
         assert!(is_valid_cvc("", "oi", "", false));
+    }
+
+    /// Frozen copy of the pre-table `strip_mark` match, kept as the oracle
+    /// for the table rewrite. Only the 7 bare marked chars strip; toned
+    /// variants (e.g. 'ầ') are identity.
+    fn legacy_strip_mark(c: char) -> char {
+        match c {
+            'ă' | 'â' => 'a',
+            'ê' => 'e',
+            'ô' | 'ơ' => 'o',
+            'ư' => 'u',
+            'đ' => 'd',
+            _ => c,
+        }
+    }
+
+    /// Parity: table-backed `strip_mark` must match the legacy match chain,
+    /// including the exact-match-only semantics for toned variants.
+    #[test]
+    fn strip_mark_matches_legacy() {
+        use crate::phonetics::VOWELS;
+        let mut inputs: Vec<char> = (' '..='~').collect();
+        for &c in VOWELS {
+            inputs.push(c);
+        }
+        inputs.extend(['đ', '中', '–']);
+        inputs.push('\u{8E2}');
+        for c in inputs {
+            assert_eq!(strip_mark(c), legacy_strip_mark(c), "strip_mark({c:?})");
+        }
     }
 
     #[test]
