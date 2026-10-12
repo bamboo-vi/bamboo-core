@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.27] - 2026-10-12
+
 ### Performance
 - **Branchless popcount-rank DFA lookup:** `get_transition` is 1 bit-test + 1 `popcnt` rank with no data-dependent branches (was two 8-key SWAR chunks with 4 branches + tail gate; an intermediate 16-lane SWAR step was superseded mid-pass by the rank scheme). `trans_states` sorted by key, `trans_keys` dropped; `State` shrunk from 88 B to **64 B** (single cache line), `comp_hash` moved to a side table; `composition_matches_canonical` compares masked `u128` words. Also fixes a latent invariant bug: a 17th distinct key no longer sets its bitset bit without storing (`popcount(bitset) == trans_len` now holds).
 - **Dense phonetics decode table:** `const` 2K-entry page table replaces PHF `VOWEL_INDEX`/`MARKS_MAPS` in `is_vowel`, `find_vowel_position`, `add_tone_to_char` (new `TONE_TABLE`), `add_mark_to_toneless_char`, `upper` and spelling `strip_mark`; table dimensions derive from `VOWELS.len()`.

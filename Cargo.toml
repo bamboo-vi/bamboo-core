@@ -1,12 +1,12 @@
 [package]
 name = "bamboo-core"
-version = "0.3.26"
+version = "0.3.27"
 edition = "2024"
 rust-version = "1.88"
 
 description = "Vietnamese input method engine written in Rust"
 license = "MIT"
-repository = "https://github.com/nguyen10t2/bamboo_core"
+repository = "https://github.com/bamboo-vi/bamboo-core"
 documentation = "https://docs.rs/bamboo-core"
 readme = "README.md"
 
