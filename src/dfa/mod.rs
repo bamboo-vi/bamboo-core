@@ -108,9 +108,10 @@ impl State {
     ///
     /// Keeps `trans_states` sorted by key (rank = popcount of lower bits
     /// doubles as the update position and the insert position — no scan).
-    /// State IDs above [`MAX_STATE_ID`] are silently dropped, and a 17th
-    /// distinct key is rejected WITHOUT setting its bitset bit, preserving
-    /// the `popcount(bitset) == trans_len` invariant the rank lookup relies on.
+    /// State IDs above the `u16` address space are silently dropped, and a
+    /// 17th distinct key is rejected WITHOUT setting its bitset bit,
+    /// preserving the `popcount(bitset) == trans_len` invariant the rank
+    /// lookup relies on.
     ///
     /// # Arguments
     /// * `key` - The ASCII key trigger.
