@@ -154,7 +154,7 @@ assert_eq!(engine.get_processed_str(OutputOptions::FULL_TEXT), "Trăng");
 
 ## Performance & Benchmarks
 
-Bamboo Core is architected for zero heap allocations in the interactive typing loop, sub-microsecond keystroke latency, and high CPU cache efficiency via L1 cache line packing and SWAR vector matching. On current `main` the `Engine` footprint is 688 B (hot-first field layout, no persisted scratch stacks, lazy DFA arenas, 8-byte snapshots), with an L1-resident ~360 B working set per keystroke; DFA states are 88 B with hot fields in the first cache line.
+Bamboo Core is architected for zero heap allocations in the interactive typing loop, sub-microsecond keystroke latency, and high CPU cache efficiency via L1 cache line packing and SWAR vector matching. On current `main` the `Engine` footprint is 712 B (hot-first field layout, no persisted scratch stacks, lazy DFA arenas, 8-byte snapshots), with an L1-resident ~360 B working set per keystroke; DFA states are 64 B single-cache-line (popcount-rank transitions, no key array).
 
 | Benchmark Scenario | Previous Baseline (`v0.3.19`) | Optimized (`v0.3.21`) | Speedup |
 |---|---|---|---|
@@ -177,7 +177,7 @@ The codebase follows a modular domain-driven architecture designed for zero allo
 - **`engine` (`src/engine/`)**: Core state machine managing active syllable compositions (`TransformationStack`), Counting Sort pre-partitioned rule index tables (`EngineRules`), $O(1)$ keystroke rollback snapshots (8-byte `Snapshot`), and word restoration.
 - **`input_method` (`src/input_method/`)**: Input method definitions (Telex, VNI, VIQR, Microsoft layout) with zero-copy rule sharing across instances via `Arc<EngineRules>` and `Arc<InputMethod>`.
 - **`orthography` (`src/orthography/`)**: Vietnamese orthography domain covering character phonetics, dense diacritic and tone tables, $O(1)$ bitmask syllable validation (`spelling`), and CVC syllable boundary extraction.
-- **`dfa` (`src/dfa/`)**: JIT cache with flat arena storage (lazy arenas, 8192-state freeze cap), 128-bit bitset fast rejection, SWAR 8-byte chunk scanning for state transitions, 88 B states with hot fields in the first cache line, and canvas flattener.
+- **`dfa` (`src/dfa/`)**: JIT cache with flat arena storage (lazy arenas, 8192-state freeze cap), 128-bit bitset fast rejection, branchless popcount-rank transition lookup, 64 B single-cache-line states, and canvas flattener.
 - **`encoder` (`src/encoder/`)**: Zero-allocation legacy encoding conversion supporting 16 Vietnamese character sets (TCVN3, VNI-Windows, VIQR, VISCII, VPS, etc.).
 - **`ffi` (`src/ffi.rs`) & `wasm` (`src/wasm.rs`)**: Safe C-ABI bindings with `#![deny(unsafe_op_in_unsafe_fn)]` and WebAssembly wrappers.
 
