@@ -312,8 +312,10 @@ impl Engine {
         self.snapshot_len = 0;
     }
 
-    fn get_applicable_rules(&self, key: char) -> &[Rule] {
-        let key = lower(key);
+    /// `lower_key` must already be lowercased (callers hold it); the extra
+    /// `lower()` per slow keystroke is hoisted out.
+    fn get_applicable_rules(&self, lower_key: char) -> &[Rule] {
+        let key = lower_key;
         if key.is_ascii() {
             let (start, end) = self.rules.ascii_rule_indices[key as usize];
             &self.rules.all_rules[start as usize..end as usize]
@@ -481,7 +483,7 @@ impl Engine {
             let tmp_cvc = crate::syllable::extract_cvc_trans(&tmp_data[..combined_len]);
             let (target, rule) = crate::syllable::find_target(
                 &tmp_data[..combined_len],
-                self.get_applicable_rules(self.input_method.super_keys[0]),
+                self.get_applicable_rules(lower(self.input_method.super_keys[0])),
                 self.config,
                 &tmp_cvc,
             );

@@ -7,7 +7,9 @@ use crate::phonetics::{add_mark_to_char, add_tone_to_char, lower, upper};
 
 /// Converts a slice of transformations into a string based on the provided options.
 pub(crate) fn flatten_slice(composition: &[Transformation], options: OutputOptions) -> String {
-    let mut out = String::with_capacity(estimate_cap_bytes_slice(composition, options));
+    // Exact upper bound in O(1): each transformation emits at most one char
+    // (at most 4 UTF-8 bytes), replacing the estimate pre-pass.
+    let mut out = String::with_capacity(composition.len() * 4);
     write_canvas_slice(composition, options, &mut out);
     out
 }
@@ -19,7 +21,7 @@ pub(crate) fn append_flatten_slice(
     options: OutputOptions,
     out: &mut String,
 ) {
-    out.reserve(estimate_cap_bytes_slice(composition, options));
+    out.reserve(composition.len() * 4);
     write_canvas_slice(composition, options, out);
 }
 
@@ -54,7 +56,7 @@ pub(crate) fn append_flatten_bytes(
     options: OutputOptions,
     out: &mut Vec<u8>,
 ) {
-    out.reserve(estimate_cap_bytes_slice(composition, options));
+    out.reserve(composition.len() * 4);
     write_canvas_slice(composition, options, out);
 }
 
@@ -73,31 +75,23 @@ pub(crate) fn append_text_with_options(text: &str, options: OutputOptions, out: 
         out.push_str(text);
         return;
     }
+    let tone_less = options.contains(OutputOptions::TONE_LESS);
+    let mark_less = options.contains(OutputOptions::MARK_LESS);
+    let lower_case = options.contains(OutputOptions::LOWER_CASE);
     for c in text.chars() {
-        // Tone and mark tables are lowercase-only.
-        let mut chr = lower(c);
-        if options.contains(OutputOptions::TONE_LESS) {
+        // Tone and mark tables are lowercase-only. `lowered` is computed
+        // once and reused for both normalization and the case check below.
+        let lowered = lower(c);
+        let mut chr = lowered;
+        if tone_less {
             chr = add_tone_to_char(chr, 0);
         }
-        if options.contains(OutputOptions::MARK_LESS) {
+        if mark_less {
             chr = crate::phonetics::add_mark_to_toneless_char(add_tone_to_char(chr, 0), 0);
         }
-        let keep_upper = !options.contains(OutputOptions::LOWER_CASE) && c != lower(c);
+        let keep_upper = !lower_case && c != lowered;
         out.push(if keep_upper { upper(chr) } else { chr });
     }
-}
-
-#[inline]
-fn estimate_cap_bytes_slice(composition: &[Transformation], options: OutputOptions) -> usize {
-    let char_count = if options.contains(OutputOptions::RAW) {
-        composition.iter().filter(|t| t.key != '\0').count()
-    } else {
-        composition
-            .iter()
-            .filter(|t| t.effect_type == EffectType::Appending && t.key != '\0')
-            .count()
-    };
-    char_count * 4
 }
 
 fn write_canvas_slice<S: CanvasSink>(
@@ -115,25 +109,40 @@ fn write_canvas_slice<S: CanvasSink>(
         return;
     }
 
+    // Loop-invariant options, hoisted so the loops below contain no
+    // per-character option tests.
+    let raw = options.contains(OutputOptions::RAW);
+    let tone_less = options.contains(OutputOptions::TONE_LESS);
+    let mark_less = options.contains(OutputOptions::MARK_LESS);
+    let lower_case = options.contains(OutputOptions::LOWER_CASE);
+
+    // Intrusive effect chains in application order: `head_effect[t]` is the
+    // first transform targeting `t`, `tail_effect[t]` the last one appended,
+    // `next_effect` links them oldest-first. Forward links always point to a
+    // later insertion, so cycles are impossible by construction.
     const NO_EFFECT: u8 = 0xFF;
     let mut next_effect = [NO_EFFECT; MAX_ACTIVE_TRANS];
     let mut head_effect = [NO_EFFECT; MAX_ACTIVE_TRANS];
+    let mut tail_effect = [NO_EFFECT; MAX_ACTIVE_TRANS];
     let mut appending_idxs = [0u8; MAX_ACTIVE_TRANS];
     let mut appending_len = 0usize;
 
     for (idx, trans) in composition.iter().enumerate() {
-        if (options.contains(OutputOptions::RAW) || trans.effect_type == EffectType::Appending)
-            && trans.key != '\0'
-        {
-            if appending_len < MAX_ACTIVE_TRANS {
-                appending_idxs[appending_len] = idx as u8;
-                appending_len += 1;
-            }
+        if (raw || trans.effect_type == EffectType::Appending) && trans.key != '\0' {
+            // Dead-guard removed: `len <= MAX_ACTIVE_TRANS` above bounds
+            // `appending_len` to the array size.
+            appending_idxs[appending_len] = idx as u8;
+            appending_len += 1;
         } else if let Some(target) = trans.target()
             && (target as usize) < len
         {
-            next_effect[idx] = head_effect[target as usize];
-            head_effect[target as usize] = idx as u8;
+            let t = target as usize;
+            if head_effect[t] == NO_EFFECT {
+                head_effect[t] = idx as u8;
+            } else {
+                next_effect[tail_effect[t] as usize] = idx as u8;
+            }
+            tail_effect[t] = idx as u8;
         }
     }
 
@@ -142,29 +151,17 @@ fn write_canvas_slice<S: CanvasSink>(
         let appending_trans = &composition[abs_idx];
 
         let mut chr: char;
-        if options.contains(OutputOptions::RAW) {
+        if raw {
             chr = appending_trans.key;
         } else {
             chr = appending_trans.effect_on;
 
+            // Application order straight from the chain: no collect buffer,
+            // no reverse pass. Bounded defensively (unreachable by construction).
             let mut curr = head_effect[abs_idx];
-            let mut effects = [0u8; MAX_ACTIVE_TRANS];
-            let mut count = 0;
-            while curr != NO_EFFECT {
-                if count >= MAX_ACTIVE_TRANS {
-                    debug_assert!(
-                        false,
-                        "flattener: effect chain exceeded MAX_ACTIVE_TRANS — possible cycle"
-                    );
-                    break;
-                }
-                effects[count] = curr;
-                count += 1;
-                curr = next_effect[curr as usize];
-            }
-
-            for &eff_idx in effects[..count].iter().rev() {
-                let t = &composition[eff_idx as usize];
+            let mut guard = 0usize;
+            while curr != NO_EFFECT && guard < MAX_ACTIVE_TRANS {
+                let t = &composition[curr as usize];
 
                 match t.effect_type {
                     EffectType::MarkTransformation => {
@@ -179,17 +176,23 @@ fn write_canvas_slice<S: CanvasSink>(
                     }
                     _ => {}
                 }
+                curr = next_effect[curr as usize];
+                guard += 1;
             }
+            debug_assert!(
+                curr == NO_EFFECT,
+                "flattener: effect chain exceeded MAX_ACTIVE_TRANS — possible cycle"
+            );
         }
 
-        if options.contains(OutputOptions::TONE_LESS) {
+        if tone_less {
             chr = add_tone_to_char(chr, 0);
         }
-        if options.contains(OutputOptions::MARK_LESS) {
+        if mark_less {
             chr = crate::phonetics::add_mark_to_toneless_char(add_tone_to_char(chr, 0), 0);
         }
 
-        let final_chr = if options.contains(OutputOptions::LOWER_CASE) {
+        let final_chr = if lower_case {
             lower(chr)
         } else if appending_trans.is_upper_case {
             upper(chr)
