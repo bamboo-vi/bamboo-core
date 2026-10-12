@@ -85,6 +85,10 @@ fn test_struct_sizes() {
         std::mem::size_of::<bamboo_core::TransformationStack>(),
         std::mem::size_of::<bamboo_core::TransformationStack>() as f64 / 1024.0
     );
+    println!(
+        "  DFA State size:        {:>8} bytes (single cache line)",
+        std::mem::size_of::<bamboo_core::advanced::State>()
+    );
     println!();
 }
 
