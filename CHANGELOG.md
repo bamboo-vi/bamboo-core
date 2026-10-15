@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-15
+
+### Fixed
+- **Long identifiers no longer truncated or dropped:** the active-transformation window is widened from 16 to 32 and overflow now silently commits the head instead of cutting (`getUserNameByIdentifier` (23 chars) stays whole in the preedit; `TransformationStack::push` can no longer lose a key past the window). `active_upper_mask` widened `u16`→`u32`; `Snapshot` metadata stays 8 B (state IDs fit `u16` under the 8192-state DFA cap).
+- **`uow` horn spread by onset class:** the `uơ` rime is only complete after the `c h k kh qu th` onset class (Go bamboo-core `cvMatrix`), so `duow`→`dươ`, `dduow`→`đươ`, `tuow`→`tươ`, `nguow`→`ngươ` while `khuow`→`khuơ` and bare `uowr`→`uở` stay as typed. The class-0 free-onset extension for `oă` (`boặm`, `toắt`, `nhoằng`) is preserved. Partial inputs stay valid via Go's row-union semantics.
+- **Tone after both horns lands on `ơ`:** `tuowf`→`tườ`, `tuowfj`→`tượ` (was `từơ`/`tựơ`) — `find_tone_target` now prefers the vowel carrying `ơ/ê`, matching Go's `findToneTarget`.
+
+### Performance
+- **No scratch-stack zero-fill:** `TransformationStack` slots are `MaybeUninit` (construction of the two slow-path scratch stacks cost 2×256 B of zero-fill per keystroke at window 16, 2×512 B at 32 — the dominant regression source when widening).
+- **Incremental preedit cache:** the raw-append (English/bypass) path grows `cached_output` O(1) per key instead of re-flattening the whole preedit (which was O(n²) over a long identifier).
+- **Measured (`benches/engine_bench.rs`, median of 3×500k, vs 0.4.0):** all 13 scenarios at or faster than 0.4.0 — long identifier **-55.9%**, english passthrough **-41.8%**, mixed typing -14.9%, backspace -14.2%, feed single word -11.0%, worst-case syllable -10.5%, random typing -7.5%; no scenario regresses. Hot path stays 0-alloc (`alloc_regression` 9/9). `Engine` footprint 712 B → 1096 B (32-slot window), working set well under 4 KB.
+
+### Internal
+- **Phonology tables as data:** spelling data lives in `orthography/tables.rs` (single source of truth with how-to-extend notes) and `orthography/packing.rs` derives the `u16`-lane matchers at compile time. Tone-placement preferences (`TONE_PREFERRED`, `TONE_ON_SECOND`, `TONE_SECOND_ONSETS`) and `uơ`/`ưo` patterns (`UHO_PATTERNS`) are data tables instead of hard-coded matches.
+- **Table well-formedness tests:** no duplicate tokens per row, mask dimensions match their row groups (`tables_wellformed`); overflow undo cannot cross the silent commit and the incremental preedit cache is locked to the full flatten (`tests/preedit_overflow.rs`).
+
 ## [0.4.0] - 2026-10-12
 
 ### Release notes

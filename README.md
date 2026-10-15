@@ -21,7 +21,7 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 
 ```toml
 [dependencies]
-bamboo-core = "0.4.0"
+bamboo-core = "0.4.1"
 ```
 
 ## Quick Start — IME Integration
@@ -154,19 +154,25 @@ assert_eq!(engine.get_processed_str(OutputOptions::FULL_TEXT), "Trăng");
 
 ## Performance & Benchmarks
 
-Bamboo Core is architected for zero heap allocations in the interactive typing loop, sub-microsecond keystroke latency, and high CPU cache efficiency via L1 cache line packing and SWAR vector matching. On current `main` the `Engine` footprint is 712 B (hot-first field layout, no persisted scratch stacks, lazy DFA arenas, 8-byte snapshots), with an L1-resident ~360 B working set per keystroke; DFA states are 64 B single-cache-line (popcount-rank transitions, no key array).
+Bamboo Core is architected for zero heap allocations in the interactive typing loop, sub-microsecond keystroke latency, and high CPU cache efficiency via L1 cache line packing and SWAR vector matching. On current `main` the `Engine` footprint is 1096 B (hot-first field layout, 32-transformation window, no persisted scratch stacks, lazy DFA arenas, 8-byte snapshots), with an L1-resident working set well under 4 KB per keystroke; DFA states are 64 B single-cache-line (popcount-rank transitions, no key array).
 
-| Benchmark Scenario | Previous Baseline (`v0.3.19`) | Optimized (`v0.3.21`) | Speedup |
+| Benchmark Scenario | `v0.4.0` | `v0.4.1` | Delta |
 |---|---|---|---|
-| Compound Word (`nghiengs`) | 54.34 ns/op | **43.79 ns/op** | **+19.4%** |
-| Random Keystroke Sequence | 1.100 µs/op | **948.1 ns/op** | **+13.8%** |
-| Worst-case Deep Syllable | 70.36 ns/op | **62.77 ns/op** | **+10.8%** |
-| Mixed Typing (Viet + English) | 6.545 µs/op | **5.748 µs/op** | **+12.2%** |
-| Rapid Backspace Burst | 277.6 ns/op | **256.4 ns/op** | **+7.6%** |
-| English Passthrough | 49.33 ns/op | **47.66 ns/op** | **+3.4%** |
-| Feed Benchmark | 88.08 ns/op | **87.21 ns/op** | **+1.0%** |
+| Feed single word (`tieengs`) | 313.2 ns/op | **278.6 ns/op** | **-11.0%** |
+| Feed no warmup (DFA miss) | 6.235 µs/op | **6.001 µs/op** | **-3.7%** |
+| Feed + delta (per key) | 400.3 ns/op | **343.1 ns/op** | **-14.3%** |
+| Backspace (`tieengs`) | 350.5 ns/op | **300.9 ns/op** | **-14.2%** |
+| Backspace x3 | 389.6 ns/op | **345.4 ns/op** | **-11.3%** |
+| Mixed typing (29 chars) | 1.467 µs/op | **1.248 µs/op** | **-14.9%** |
+| Many words (13 words + spaces) | 9.504 µs/op | **9.472 µs/op** | **-0.3%** |
+| English passthrough (code) | 320.2 ns/op | **186.3 ns/op** | **-41.8%** |
+| Long identifier (39 chars) | 791.4 ns/op | **349.2 ns/op** | **-55.9%** |
+| Backspace spam (7x) | 445.5 ns/op | **392.9 ns/op** | **-11.8%** |
+| Commit via space | 308.5 ns/op | **284.8 ns/op** | **-7.7%** |
+| Worst-case syllable (`nghieengs`) | 260.8 ns/op | **233.4 ns/op** | **-10.5%** |
+| Random typing (real workload) | 5.578 µs/op | **5.162 µs/op** | **-7.5%** |
 
-*Benchmarks measured on x86_64 Linux, Rust 1.88+ release profile with Fat LTO.*
+*Benchmarks from `benches/engine_bench.rs`, medians of 3 runs of 500k iterations, x86_64 Linux, Rust 1.88+ release profile with Fat LTO.*
 
 > **Note for developers:** bench binaries run a fast smoke under `cargo test --all-targets`; the full suites (including multi-minute EXTREME memory profiles) run only under `cargo bench`. Per-keystroke polling loops should prefer `get_processed_str_cow` over `get_processed_str` to borrow cached output instead of allocating.
 
