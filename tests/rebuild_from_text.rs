@@ -210,12 +210,21 @@ fn restore_after_rebuild_drops_tone_and_marks_from_keys() {
 
 #[test]
 fn word_too_long_for_composition_stays_text() {
-    let text = "xin internationalization";
+    let text = "xin internationalizationinternationalization";
     let mut e = engine(InputMethod::telex());
     e.rebuild_from_text(text);
     assert_eq!(full_text(&e), text);
     assert_eq!(e.output(), "");
     assert_eq!(e.get_processed_str(OutputOptions::RAW | OutputOptions::FULL_TEXT), text);
+}
+
+#[test]
+fn word_within_window_becomes_active_composition() {
+    // 20 chars fit the 32-transformation window: rebuilt as the active word.
+    let mut e = engine(InputMethod::telex());
+    e.rebuild_from_text("xin internationalization");
+    assert_eq!(full_text(&e), "xin internationalization");
+    assert_eq!(e.output(), "internationalization");
 }
 
 #[test]

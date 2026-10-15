@@ -37,7 +37,7 @@ pub struct Engine {
     /// the DFA-hit path and snapshots need no per-key fold. Invariant is
     /// checked by a `debug_assert` in [`Engine::update_cached_output`], which
     /// runs on every keystroke in test builds.
-    active_upper_mask: u16,
+    active_upper_mask: u32,
     /// Snapshot stack for O(1) backspace — 8-byte metadata per slot, zero heap.
     snapshots: [Snapshot; MAX_ACTIVE_TRANS],
     snapshot_len: usize,
@@ -156,7 +156,7 @@ impl Engine {
             self.active_slice()
                 .iter()
                 .enumerate()
-                .fold(0u16, |m, (i, t)| { if t.is_upper_case { m | (1u16 << i) } else { m } }),
+                .fold(0u32, |m, (i, t)| { if t.is_upper_case { m | (1u32 << i) } else { m } }),
             "active_upper_mask out of sync with active_buffer"
         );
         self.cached_output.clear();
@@ -197,24 +197,33 @@ impl Engine {
             .active_slice()
             .iter()
             .enumerate()
-            .fold(0u16, |m, (i, t)| if t.is_upper_case { m | (1u16 << i) } else { m });
+            .fold(0u32, |m, (i, t)| if t.is_upper_case { m | (1u32 << i) } else { m });
     }
 
     #[inline]
     fn push_snapshot(&mut self) {
         if self.snapshot_len < MAX_ACTIVE_TRANS {
-            let needs_buffer = self.english_bypass || self.current_state_id == 0;
+            // Empty actives are restored by length alone: skip the buffer copy
+            // at word starts (`state_id == 0`), which used to copy the whole
+            // active buffer on every first key of a word.
+            let needs_buffer =
+                self.english_bypass || (self.active_len > 0 && self.current_state_id == 0);
             let snap = &mut self.snapshots[self.snapshot_len];
-            snap.state_id = self.current_state_id;
+            snap.state_id = self.current_state_id as u16;
             snap.active_len = self.active_len as u8;
             // Pre-key mask, maintained incrementally (no per-key fold).
             snap.upper_mask = self.active_upper_mask;
             snap.flags = if self.english_bypass { FLAG_ENGLISH_BYPASS } else { 0 }
                 | if needs_buffer { FLAG_NEEDS_BUFFER } else { 0 };
             if needs_buffer {
-                let bufs = self.bypass_buffers.get_or_insert_with(|| {
+                // Out-of-line so the 16 KB array temp never inflates the
+                // inlined `push_snapshot` frame on the hot keystroke path.
+                #[inline(never)]
+                fn alloc_bypass_buffers()
+                -> Box<[[Transformation; MAX_ACTIVE_TRANS]; MAX_ACTIVE_TRANS]> {
                     Box::new([[Transformation::default(); MAX_ACTIVE_TRANS]; MAX_ACTIVE_TRANS])
-                });
+                }
+                let bufs = self.bypass_buffers.get_or_insert_with(alloc_bypass_buffers);
                 bufs[self.snapshot_len] = self.active_buffer;
             }
             self.snapshot_len += 1;
@@ -228,7 +237,7 @@ impl Engine {
         }
         self.snapshot_len -= 1;
         let snap = &self.snapshots[self.snapshot_len];
-        self.current_state_id = snap.state_id;
+        self.current_state_id = snap.state_id as u32;
         self.english_bypass = snap.flags & FLAG_ENGLISH_BYPASS != 0;
         if snap.state_id != 0 {
             // Restored from the DFA arena (or a bypass buffer holding exactly
@@ -246,7 +255,7 @@ impl Engine {
             self.active_len = snap.active_len as usize;
         } else if snap.state_id != 0 {
             // Restore from DFA arena + re-apply case bits.
-            let comp = self.dfa.get_composition(snap.state_id);
+            let comp = self.dfa.get_composition(snap.state_id as u32);
             let len = comp.len().min(MAX_ACTIVE_TRANS);
             self.active_buffer[..len].copy_from_slice(comp);
             self.active_len = len;
@@ -260,7 +269,7 @@ impl Engine {
             .active_slice()
             .iter()
             .enumerate()
-            .fold(0u16, |m, (i, t)| if t.is_upper_case { m | (1u16 << i) } else { m });
+            .fold(0u32, |m, (i, t)| if t.is_upper_case { m | (1u32 << i) } else { m });
         Some(())
     }
 
@@ -697,11 +706,14 @@ impl Engine {
     /// in a row undoes the tone and types the key as a literal letter
     /// (e.g. `ass` → `as`).
     pub fn process_key(&mut self, key: char, mode: Mode) {
-        self.process_key_internal(key, mode);
-        self.update_cached_output();
+        if !self.process_key_internal(key, mode) {
+            self.update_cached_output();
+        }
     }
 
-    fn process_key_internal(&mut self, key: char, mode: Mode) {
+    /// Returns `true` when the preedit cache is already up to date (the key
+    /// went through the raw-append path, which maintains it incrementally).
+    fn process_key_internal(&mut self, key: char, mode: Mode) -> bool {
         let lower_key = lower(key);
         let is_upper_case = is_upper(key);
 
@@ -709,7 +721,7 @@ impl Engine {
         // Direct buffer append — no DFA lookup, snapshot saved for backspace.
         if mode == Mode::English || self.english_bypass {
             self.push_english_append(lower_key, is_upper_case, mode);
-            return;
+            return true;
         }
 
         let bracket = self.bracket_vowel(lower_key, self.active_len == 0);
@@ -718,16 +730,32 @@ impl Engine {
 
         // DFA fast path: returns true when a cached transition handled the key.
         if self.try_dfa_hit(lower_key, is_upper_case) {
-            return;
+            return false;
         }
 
         // Slow path: validate key and handle word breaks
         if bracket.is_none() && !self.can_process_key_raw(lower_key) {
             self.handle_word_break_key(lower_key, is_upper_case);
-            return;
+            return false;
         }
 
+        self.process_key_slow(lower_key, is_upper_case);
+        false
+    }
+
+    /// Rule-engine slow path for keys the DFA could not resolve.
+    ///
+    /// Kept out of [`Engine::process_key_internal`] (and never inlined) so the
+    /// hot DFA-hit path never pays the stack frame of the two scratch
+    /// [`TransformationStack`]s.
+    #[inline(never)]
+    fn process_key_slow(&mut self, lower_key: char, is_upper_case: bool) {
         // Snapshot only needed before slow-path mutations (new_composition_in_place).
+        // Window full: silently commit the head first so no key is ever dropped
+        // (TransformationStack::push would discard past MAX_ACTIVE_TRANS).
+        if self.active_len >= MAX_ACTIVE_TRANS {
+            self.commit();
+        }
         self.push_snapshot();
 
         // The JIT edge cur--key-->next below is only sound when `cur`
@@ -735,7 +763,7 @@ impl Engine {
         // is lowercase-canonical). Residue states — frozen refusal, digit /
         // non-ASCII / English residue, retargeted tone — must not link edges
         // (e.g. a word-start edge must never point at a mid-word composition).
-        // Slow path only: one memcmp over <=16 transformations.
+        // Slow path only: one memcmp over <=32 transformations.
         let prefix_known = if self.active_len == 0 {
             // Word start: only state 0 identifies empty text.
             self.current_state_id == 0
@@ -779,6 +807,9 @@ impl Engine {
     }
 
     /// English-mode (or bypassed) key: appends raw, committing on word breaks.
+    ///
+    /// Maintains `cached_output` incrementally (O(1) per key) so long raw runs
+    /// do not re-flatten the whole preedit on every keystroke.
     fn push_english_append(&mut self, lower_key: char, is_upper_case: bool, mode: Mode) {
         // VNI tone keys are digits: they belong to the word, so restore,
         // raw output and backspace must still reach them.
@@ -794,13 +825,17 @@ impl Engine {
             self.push_snapshot();
         }
         if is_upper_case {
-            self.active_upper_mask |= 1u16 << self.active_len;
+            self.active_upper_mask |= 1u32 << self.active_len;
         }
         self.active_buffer[self.active_len] =
             crate::syllable::new_appending_trans(lower_key, is_upper_case);
         self.active_len += 1;
         if ends_word {
             self.commit();
+        } else {
+            // Pure append: the preedit grows by exactly one cased char.
+            // Any `commit()` above already cleared `cached_output`.
+            self.cached_output.push(if is_upper_case { upper(lower_key) } else { lower_key });
         }
         self.current_state_id = 0;
     }
@@ -846,12 +881,12 @@ impl Engine {
         // Maintain the mask with bit ops: keep shared prefix bits, set the
         // new tail when the fresh key is uppercase.
         let shared = prev_len.min(self.active_len);
-        let keep = if shared >= 16 { u16::MAX } else { (1u16 << shared) - 1 };
+        let keep = if shared >= 32 { u32::MAX } else { (1u32 << shared) - 1 };
         let mut new_mask = prev_upper & keep;
         if is_upper_case && prev_len <= self.active_len {
             for (k, t) in self.active_buffer[prev_len..self.active_len].iter_mut().enumerate() {
                 t.is_upper_case = true;
-                new_mask |= 1u16 << (prev_len + k);
+                new_mask |= 1u32 << (prev_len + k);
             }
         }
         self.active_upper_mask = new_mask;
@@ -961,7 +996,7 @@ impl Engine {
             self.commit();
         }
         if trans.is_upper_case {
-            self.active_upper_mask |= 1u16 << self.active_len;
+            self.active_upper_mask |= 1u32 << self.active_len;
         }
         self.active_buffer[self.active_len] = trans;
         self.active_len += 1;
@@ -1176,7 +1211,7 @@ impl Engine {
             .active_slice()
             .iter()
             .enumerate()
-            .fold(0u16, |m, (i, t)| if t.is_upper_case { m | (1u16 << i) } else { m });
+            .fold(0u32, |m, (i, t)| if t.is_upper_case { m | (1u32 << i) } else { m });
         self.update_cached_output();
     }
 

@@ -262,7 +262,7 @@ impl Dfa {
     /// `find_state(...).unwrap_or(0)` (rule-engine slow path stays correct).
     pub fn add_state(&mut self, composition: &[Transformation]) -> u32 {
         // Arena-bounded: `comp_len`/`flat_len` below truncate into `u8`.
-        debug_assert!(composition.len() <= MAX_TRANS);
+        debug_assert!(composition.len() <= u8::MAX as usize);
         let hash = hash_composition(composition);
 
         // Fast path: hash match -> verify arena equality (no heap allocation).

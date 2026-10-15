@@ -1,4 +1,5 @@
 use crate::input_method::{EffectType, Rule, Tone};
+use std::mem::MaybeUninit;
 
 /// Options for restoring or refreshing tone targets when removing characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -23,7 +24,7 @@ impl From<RestoreMark> for bool {
 }
 
 /// Maximum number of active transformations in a single syllable.
-pub const MAX_ACTIVE_TRANS: usize = 16;
+pub const MAX_ACTIVE_TRANS: usize = 32;
 
 /// Sentinel value representing `None` for a transformation target index.
 pub const TARGET_NONE: u8 = 0xFF;
@@ -140,16 +141,19 @@ impl Transformation {
 /// A stack-allocated buffer for transformations to avoid heap allocations in the hot path.
 ///
 /// This structure uses a fixed-size array and is extremely fast for frequent updates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
+/// Slots are [`MaybeUninit`]: constructing a stack is free (no zero-fill of the
+/// whole array on every slow-path keystroke — 512 B at [`MAX_ACTIVE_TRANS`] 32),
+/// and only the `len` used slots are ever read.
+#[derive(Clone, Copy)]
 pub struct TransformationStack {
-    pub(crate) data: [Transformation; MAX_ACTIVE_TRANS],
+    pub(crate) data: [MaybeUninit<Transformation>; MAX_ACTIVE_TRANS],
     pub(crate) len: usize,
 }
 
 impl TransformationStack {
     /// Creates a new, empty transformation stack.
-    pub fn new() -> Self {
-        Self { data: [Transformation::default(); MAX_ACTIVE_TRANS], len: 0 }
+    pub const fn new() -> Self {
+        Self { data: [const { MaybeUninit::uninit() }; MAX_ACTIVE_TRANS], len: 0 }
     }
 
     /// Pushes a new transformation onto the stack.
@@ -160,7 +164,7 @@ impl TransformationStack {
             "TransformationStack overflow: max {MAX_ACTIVE_TRANS} reached"
         );
         if self.len < MAX_ACTIVE_TRANS {
-            self.data[self.len] = t;
+            self.data[self.len].write(t);
             self.len += 1;
         }
     }
@@ -181,30 +185,66 @@ impl TransformationStack {
     }
 
     /// Returns a slice containing all transformations in the stack.
-    pub fn as_slice(&self) -> &[Transformation] {
-        &self.data[..self.len]
+    pub const fn as_slice(&self) -> &[Transformation] {
+        // SAFETY: slots `[..len]` are initialized by `push`/`extend_from_slice`.
+        unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<Transformation>(), self.len) }
     }
 
     /// Returns a mutable slice containing all transformations in the stack.
-    pub fn as_mut_slice(&mut self) -> &mut [Transformation] {
-        &mut self.data[..self.len]
+    pub const fn as_mut_slice(&mut self) -> &mut [Transformation] {
+        // SAFETY: slots `[..len]` are initialized by `push`/`extend_from_slice`.
+        unsafe {
+            std::slice::from_raw_parts_mut(
+                self.data.as_mut_ptr().cast::<Transformation>(),
+                self.len,
+            )
+        }
     }
 
     /// Appends a slice of transformations to the stack.
     pub fn extend_from_slice(&mut self, other: &[Transformation]) {
         let to_copy = other.len().min(MAX_ACTIVE_TRANS - self.len);
-        if to_copy > 0 {
-            self.data[self.len..self.len + to_copy].copy_from_slice(&other[..to_copy]);
-            self.len += to_copy;
+        for (slot, &t) in self.data[self.len..self.len + to_copy].iter_mut().zip(other) {
+            slot.write(t);
         }
+        self.len += to_copy;
     }
 
     /// Drains transformations from a starting index into another stack.
     pub fn drain_to(&mut self, start: usize, target: &mut TransformationStack) {
         target.clear();
         if start < self.len {
-            target.extend_from_slice(&self.data[start..self.len]);
+            target.extend_from_slice(&self.as_slice()[start..]);
             self.len = start;
         }
+    }
+}
+
+impl Default for TransformationStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for TransformationStack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransformationStack")
+            .field("data", &self.as_slice())
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
+impl PartialEq for TransformationStack {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl Eq for TransformationStack {}
+
+impl std::hash::Hash for TransformationStack {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state);
     }
 }

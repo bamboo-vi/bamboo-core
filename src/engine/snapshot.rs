@@ -8,17 +8,19 @@ pub(crate) const FLAG_NEEDS_BUFFER: u8 = 2;
 ///
 /// The active composition itself is **not** stored here when it is recoverable
 /// from the DFA arena (`state_id != 0`). Only the metadata needed to restore is
-/// kept, shrinking the snapshot from 272 B to 8 B and the `Engine` from
-/// ~5.3 KB to ~1.3 KB. When the composition is not in the DFA (English bypass,
-/// word-break, or slow-path fallback), the caller copies the buffer into
-/// `Engine::bypass_buffers` and sets [`FLAG_NEEDS_BUFFER`].
+/// kept, shrinking the snapshot from 528 B to 8 B. When the composition is not
+/// in the DFA (English bypass, word-break, or slow-path fallback), the caller
+/// copies the buffer into `Engine::bypass_buffers` and sets [`FLAG_NEEDS_BUFFER`].
+///
+/// Field order packs exactly 8 bytes: state IDs fit `u16` (DFA is capped at
+/// [`crate::dfa::DFA_MAX_STATES`] ≪ `u16::MAX`).
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub(crate) struct Snapshot {
-    /// DFA state id at snapshot time (0 = empty / not in DFA).
-    pub(crate) state_id: u32,
     /// Bitmask of `is_upper_case` flags: bit *i* = `active_buffer[i].is_upper_case`.
-    pub(crate) upper_mask: u16,
+    pub(crate) upper_mask: u32,
+    /// DFA state id at snapshot time (0 = empty / not in DFA).
+    pub(crate) state_id: u16,
     /// Length of `active_buffer` at snapshot time.
     pub(crate) active_len: u8,
     /// Combination of [`FLAG_ENGLISH_BYPASS`] and [`FLAG_NEEDS_BUFFER`].
