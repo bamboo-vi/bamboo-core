@@ -3,8 +3,11 @@
 //!
 //! How to extend (keep engine logic out of here):
 //! - New rime/onset/coda token → add a line to the matching row ([`FC_0`]..
-//!   [`FC_4`], [`VO_0`]..[`VO_7`], [`LC_0`]..[`LC_4`]); packed forms derive
-//!   automatically in [`crate::orthography::packing`].
+//!   [`FC_4`], [`VO_0`]..[`VO_7`], [`LC_0`]..[`LC_4`]) **and bump the row
+//!   length in the `*_PACKED` parallel** in [`crate::orthography::packing`]
+//!   (two edits, but the compiler enforces both). A 6th onset class would
+//!   also widen `CV_OK` (`[u16; 32]` → 64) and its `0x1F` mask there and in
+//!   `spelling.rs`.
 //! - New allowed/forbidden combination → edit [`VC_ALLOWED_MASKS`] /
 //!   [`CV_ALLOWED_MASKS`] (one row per class, bit = allowed partner row).
 //! - New tone-placement preference → edit [`TONE_PREFERRED`] /
@@ -146,6 +149,12 @@ pub(crate) static LC_4: [Token; 1] = [(['c', '\0', '\0', '\0'], 1)];
 
 #[cfg(test)]
 pub(crate) static LC_ROWS: &[&[Token]] = &[&LC_0, &LC_1, &LC_2, &LC_3, &LC_4];
+/// Which codas each vowel row may take — Go bamboo-core's `vcMatrix`,
+/// row-for-row with [`VO_0`]..[`VO_7`], with one known divergence: row 4
+/// (`uơ`) here accepts c/ng/m/n/p/t while Go allows none (`vcMatrix[4] = {}`).
+/// Deliberate to leave as-is: `uho_tail_match_composition` rewrites `uơ`→`ươ`
+/// as soon as a letter follows (e.g. `thuowc` → `thươc`), so the divergence is
+/// unreachable from typing; revisit only if a direct-`uơ`+coda path appears.
 pub(crate) const VC_ALLOWED_MASKS: [u16; 8] = [
     (1 << 0) | (1 << 2),
     (1 << 0) | (1 << 1) | (1 << 2),
@@ -192,3 +201,35 @@ pub(crate) const TONE_SECOND_ONSETS: [&[char]; 2] = [&['t', 'h'], &['h']];
 /// Intermediate rime pairs (`uơ` / `ưo`) that resolve to `ươ` once a letter
 /// follows (`uho_tail_match_composition`).
 pub(crate) const UHO_PATTERNS: [(char, char); 2] = [('u', 'ơ'), ('ư', 'o')];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Duplicate tokens within a row would silently shadow later entries
+    /// (lookup stops at the first hit per row), and a mask bit past the row
+    /// count would grant pairings that no class can express.
+    #[test]
+    fn tables_wellformed() {
+        let groups: &[&[&[Token]]] = &[FC_ROWS, VO_ROWS, LC_ROWS];
+        for rows in groups {
+            for (i, row) in rows.iter().enumerate() {
+                for (j, a) in row.iter().enumerate() {
+                    for b in &row[j + 1..] {
+                        assert_ne!(a.0, b.0, "duplicate token {:?} in row {i}", a.0);
+                    }
+                }
+            }
+        }
+        assert_eq!(CV_ALLOWED_MASKS.len(), FC_ROWS.len(), "cvMatrix rows = onset classes");
+        assert_eq!(VC_ALLOWED_MASKS.len(), VO_ROWS.len(), "vcMatrix rows = vowel rows");
+        let vo_span = (1u16 << VO_ROWS.len()) - 1;
+        let lc_span = (1u16 << LC_ROWS.len()) - 1;
+        for (i, &m) in CV_ALLOWED_MASKS.iter().enumerate() {
+            assert_eq!(m & !vo_span, 0, "cv row {i} bit past vowel rows");
+        }
+        for (i, &m) in VC_ALLOWED_MASKS.iter().enumerate() {
+            assert_eq!(m & !lc_span, 0, "vc row {i} bit past coda rows");
+        }
+    }
+}

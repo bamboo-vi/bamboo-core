@@ -31,6 +31,13 @@ fn telex_uow_spreads_both_horns_for_onsets_that_forbid_uơ() {
 }
 
 #[test]
+fn telex_tone_lands_on_ơ_after_both_horns() {
+    // Go's findToneTarget prefers the vowel carrying ơ/ê for the tone, coda
+    // or not: `tuowf` is `tườ`, not `từơ` (bench-fcitx5 report #578/#579).
+    check(InputMethod::telex(), &[("tuowf", "tườ"), ("tuowfj", "tượ")]);
+}
+
+#[test]
 fn telex_horn_spreads_to_u_when_letter_follows() {
     check(InputMethod::telex(), &[("huouw", "hươu"), ("thuoiwx", "thưỡi")]);
 }

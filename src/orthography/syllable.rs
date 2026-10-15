@@ -296,13 +296,26 @@ fn find_tone_target(composition: &[Transformation], cvc: &Cvc, std_style: bool) 
         let has_u_horn = vowels.iter().any(|t| t.result == 'ư');
         let has_o_horn = vowels.iter().any(|t| t.result == 'ơ');
         if has_u_horn && has_o_horn {
+            // Go's findToneTarget prefers the vowel carrying ơ/ê for the tone,
+            // coda or not (`tuowf` -> `tườ`, not `từơ`). The first/second
+            // heuristic remains as fallback for pairs without a preferred vowel.
+            let preferred = vo_abs.iter().copied().find(|&abs| {
+                TONE_PREFERRED.contains(&add_tone_to_char(
+                    resolve_appended_char(composition, abs as usize),
+                    0,
+                ))
+            });
             let is_th_or_h = {
                 let fc = cvc.fc_slice();
                 TONE_SECOND_ONSETS.iter().any(|onset| {
                     fc.len() == onset.len() && fc.iter().zip(*onset).all(|(t, &c)| t.key == c)
                 })
             };
-            target = Some(if !lc.is_empty() || is_th_or_h { vo_abs[1] } else { vo_abs[0] });
+            target = Some(preferred.unwrap_or(if !lc.is_empty() || is_th_or_h {
+                vo_abs[1]
+            } else {
+                vo_abs[0]
+            }));
         } else {
             // Use the *resolved* base char so a cancelled mark chain (e.g. "ooo"
             // undoing "oo"→"ô" on the first "o") does not steal the tone target.
