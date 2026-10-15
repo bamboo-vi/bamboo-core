@@ -1,231 +1,13 @@
 //! Vietnamese spelling validation logic based on CVC (Consonant-Vowel-Consonant) structure.
 
-// Static token representation: (chars, length)
-type Token = ([char; 4], u8);
-
-/// A spelling token with its characters pre-packed into `u16` lanes.
-/// `raw[k]` / `stripped[k]` hold lane `k` (0 for unused lanes); `len` is the
-/// token length (always 1..=3, verified by `packed_token_tables_wellformed`).
-/// All token chars are BMP (max U+1EF9), so `as u16` is exact — also verified
-/// there. Lets the matcher test whole lanes with integer compares instead of
-/// per-character branches plus `strip_mark` calls.
-#[derive(Clone, Copy)]
-struct PackedToken {
-    raw: [u16; 3],
-    stripped: [u16; 3],
-    len: u8,
-}
-
-impl PackedToken {
-    const fn pack(chars: [char; 4], len: u8) -> Self {
-        let mut raw = [0u16; 3];
-        let mut stripped = [0u16; 3];
-        let mut k = 0usize;
-        while k < 3 {
-            let c = chars[k];
-            raw[k] = c as u16;
-            stripped[k] = strip_mark(c) as u16;
-            k += 1;
-        }
-        Self { raw, stripped, len }
-    }
-}
-
-/// Builds a packed row from a char token row at compile time, keeping the
-/// char lists the single source of truth.
-const fn pack_row<const N: usize>(src: &[Token; N]) -> [PackedToken; N] {
-    let mut out = [PackedToken { raw: [0; 3], stripped: [0; 3], len: 0 }; N];
-    let mut i = 0usize;
-    while i < N {
-        let (chars, len) = src[i];
-        out[i] = PackedToken::pack(chars, len);
-        i += 1;
-    }
-    out
-}
-
-/// Single token-lane test with no branches: raw hit, or stripped hit while
-/// the input is still incomplete (mid-typing bases like 'u' match 'ư').
-#[inline(always)]
-const fn lane_eq(input: u16, raw: u16, stripped: u16, incomplete: bool) -> bool {
-    (input == raw) | (incomplete & (input == stripped))
-}
-
-/// Strips diacritic marks from a character (mark 0 = canonical base).
-/// Used in the innermost token-match loop — one decode-table load.
-/// Only the 7 bare marked chars strip; toned variants (e.g. 'ầ') and
-/// everything else are identity.
-#[inline(always)]
-const fn strip_mark(c: char) -> char {
-    match crate::phonetics::mark_root(c) {
-        Some(root) => root,
-        None => c,
-    }
-}
-
-// Any known onset may pair with any rime; only the rime itself is constrained.
-static FC: [Token; 29] = [
-    (['b', '\0', '\0', '\0'], 1),
-    (['c', '\0', '\0', '\0'], 1),
-    (['c', 'h', '\0', '\0'], 2),
-    (['d', '\0', '\0', '\0'], 1),
-    (['đ', '\0', '\0', '\0'], 1),
-    (['g', '\0', '\0', '\0'], 1),
-    (['g', 'h', '\0', '\0'], 2),
-    (['g', 'i', '\0', '\0'], 2),
-    (['h', '\0', '\0', '\0'], 1),
-    (['k', '\0', '\0', '\0'], 1),
-    (['k', 'h', '\0', '\0'], 2),
-    (['k', 'r', '\0', '\0'], 2),
-    (['l', '\0', '\0', '\0'], 1),
-    (['m', '\0', '\0', '\0'], 1),
-    (['n', '\0', '\0', '\0'], 1),
-    (['n', 'g', '\0', '\0'], 2),
-    (['n', 'g', 'h', '\0'], 3),
-    (['n', 'h', '\0', '\0'], 2),
-    (['p', '\0', '\0', '\0'], 1),
-    (['p', 'h', '\0', '\0'], 2),
-    (['q', 'u', '\0', '\0'], 2),
-    (['r', '\0', '\0', '\0'], 1),
-    (['s', '\0', '\0', '\0'], 1),
-    (['t', '\0', '\0', '\0'], 1),
-    (['t', 'h', '\0', '\0'], 2),
-    (['t', 'r', '\0', '\0'], 2),
-    (['v', '\0', '\0', '\0'], 1),
-    (['x', '\0', '\0', '\0'], 1),
-    (['z', '\0', '\0', '\0'], 1),
-];
-
-/// Char-row aggregates, kept as the readable source of truth and the legacy
-/// oracle input. Production matches on the packed parallels below.
 #[cfg(test)]
-static FC_ROWS: &[&[Token]] = &[&FC];
-
-static VO_0: [Token; 6] = [
-    (['ê', '\0', '\0', '\0'], 1),
-    (['i', '\0', '\0', '\0'], 1),
-    (['u', 'a', '\0', '\0'], 2),
-    (['u', 'ê', '\0', '\0'], 2),
-    (['u', 'y', '\0', '\0'], 2),
-    (['y', '\0', '\0', '\0'], 1),
-];
-static VO_1: [Token; 5] = [
-    (['a', '\0', '\0', '\0'], 1),
-    (['i', 'ê', '\0', '\0'], 2),
-    (['o', 'a', '\0', '\0'], 2),
-    (['u', 'y', 'ê', '\0'], 3),
-    (['y', 'ê', '\0', '\0'], 2),
-];
-static VO_2: [Token; 13] = [
-    (['â', '\0', '\0', '\0'], 1),
-    (['ă', '\0', '\0', '\0'], 1),
-    (['e', '\0', '\0', '\0'], 1),
-    (['o', '\0', '\0', '\0'], 1),
-    (['o', 'o', '\0', '\0'], 2),
-    (['ô', '\0', '\0', '\0'], 1),
-    (['ơ', '\0', '\0', '\0'], 1),
-    (['o', 'e', '\0', '\0'], 2),
-    (['u', '\0', '\0', '\0'], 1),
-    (['ư', '\0', '\0', '\0'], 1),
-    (['u', 'â', '\0', '\0'], 2),
-    (['u', 'ô', '\0', '\0'], 2),
-    (['ư', 'ơ', '\0', '\0'], 2),
-];
-static VO_3: [Token; 1] = [(['o', 'ă', '\0', '\0'], 2)];
-static VO_4: [Token; 1] = [(['u', 'ơ', '\0', '\0'], 2)];
-static VO_5: [Token; 30] = [
-    (['a', 'i', '\0', '\0'], 2),
-    (['a', 'o', '\0', '\0'], 2),
-    (['a', 'u', '\0', '\0'], 2),
-    (['â', 'u', '\0', '\0'], 2),
-    (['a', 'y', '\0', '\0'], 2),
-    (['â', 'y', '\0', '\0'], 2),
-    (['e', 'o', '\0', '\0'], 2),
-    (['ê', 'u', '\0', '\0'], 2),
-    (['i', 'a', '\0', '\0'], 2),
-    (['i', 'ê', 'u', '\0'], 3),
-    (['i', 'u', '\0', '\0'], 2),
-    (['o', 'a', 'i', '\0'], 3),
-    (['o', 'a', 'o', '\0'], 3),
-    (['o', 'a', 'y', '\0'], 3),
-    (['o', 'e', 'o', '\0'], 3),
-    (['o', 'i', '\0', '\0'], 2),
-    (['ô', 'i', '\0', '\0'], 2),
-    (['ơ', 'i', '\0', '\0'], 2),
-    (['ư', 'a', '\0', '\0'], 2),
-    (['u', 'â', 'y', '\0'], 3),
-    (['u', 'i', '\0', '\0'], 2),
-    (['ư', 'i', '\0', '\0'], 2),
-    (['u', 'ô', 'i', '\0'], 3),
-    (['ư', 'ơ', 'i', '\0'], 3),
-    (['ư', 'ơ', 'u', '\0'], 3),
-    (['ư', 'u', '\0', '\0'], 2),
-    (['u', 'y', 'a', '\0'], 3),
-    (['u', 'y', 'u', '\0'], 3),
-    (['u', 'ê', 'u', '\0'], 3),
-    (['y', 'ê', 'u', '\0'], 3),
-];
-static VO_6: [Token; 2] = [(['ă', '\0', '\0', '\0'], 1), (['u', '\0', '\0', '\0'], 1)];
-static VO_7: [Token; 1] = [(['i', '\0', '\0', '\0'], 1)];
-
+use super::packing::strip_mark;
+use super::packing::{
+    CV_OK, FC_PACKED_ROWS, LC_PACKED_ROWS, PackedToken, VC_OK, VO_PACKED_ROWS, lane_eq,
+};
 #[cfg(test)]
-static VO_ROWS: &[&[Token]] = &[&VO_0, &VO_1, &VO_2, &VO_3, &VO_4, &VO_5, &VO_6, &VO_7];
+use super::tables::{FC_ROWS, LC_ROWS, Token, VC_ALLOWED_MASKS, VO_ROWS};
 
-static LC_0: [Token; 2] = [(['c', 'h', '\0', '\0'], 2), (['n', 'h', '\0', '\0'], 2)];
-static LC_1: [Token; 2] = [(['c', '\0', '\0', '\0'], 1), (['n', 'g', '\0', '\0'], 2)];
-static LC_2: [Token; 4] = [
-    (['m', '\0', '\0', '\0'], 1),
-    (['n', '\0', '\0', '\0'], 1),
-    (['p', '\0', '\0', '\0'], 1),
-    (['t', '\0', '\0', '\0'], 1),
-];
-static LC_3: [Token; 1] = [(['k', '\0', '\0', '\0'], 1)];
-static LC_4: [Token; 1] = [(['c', '\0', '\0', '\0'], 1)];
-
-#[cfg(test)]
-static LC_ROWS: &[&[Token]] = &[&LC_0, &LC_1, &LC_2, &LC_3, &LC_4];
-
-// Packed parallels, derived from the char rows above at compile time.
-static FC_PACKED: [PackedToken; 29] = pack_row(&FC);
-static VO_0_PACKED: [PackedToken; 6] = pack_row(&VO_0);
-static VO_1_PACKED: [PackedToken; 5] = pack_row(&VO_1);
-static VO_2_PACKED: [PackedToken; 13] = pack_row(&VO_2);
-static VO_3_PACKED: [PackedToken; 1] = pack_row(&VO_3);
-static VO_4_PACKED: [PackedToken; 1] = pack_row(&VO_4);
-static VO_5_PACKED: [PackedToken; 30] = pack_row(&VO_5);
-static VO_6_PACKED: [PackedToken; 2] = pack_row(&VO_6);
-static VO_7_PACKED: [PackedToken; 1] = pack_row(&VO_7);
-static LC_0_PACKED: [PackedToken; 2] = pack_row(&LC_0);
-static LC_1_PACKED: [PackedToken; 2] = pack_row(&LC_1);
-static LC_2_PACKED: [PackedToken; 4] = pack_row(&LC_2);
-static LC_3_PACKED: [PackedToken; 1] = pack_row(&LC_3);
-static LC_4_PACKED: [PackedToken; 1] = pack_row(&LC_4);
-static FC_PACKED_ROWS: &[&[PackedToken]] = &[&FC_PACKED];
-static VO_PACKED_ROWS: &[&[PackedToken]] = &[
-    &VO_0_PACKED,
-    &VO_1_PACKED,
-    &VO_2_PACKED,
-    &VO_3_PACKED,
-    &VO_4_PACKED,
-    &VO_5_PACKED,
-    &VO_6_PACKED,
-    &VO_7_PACKED,
-];
-static LC_PACKED_ROWS: &[&[PackedToken]] =
-    &[&LC_0_PACKED, &LC_1_PACKED, &LC_2_PACKED, &LC_3_PACKED, &LC_4_PACKED];
-
-const VC_ALLOWED_MASKS: [u16; 8] = [
-    (1 << 0) | (1 << 2),
-    (1 << 0) | (1 << 1) | (1 << 2),
-    (1 << 1) | (1 << 2),
-    (1 << 1) | (1 << 2),
-    (1 << 1) | (1 << 2) | (1 << 4),
-    0,
-    1 << 3,
-    1 << 4,
-];
-
-#[inline(always)]
 fn lookup_mask_optimized(
     rows: &[&[PackedToken]],
     input: &[char],
@@ -266,44 +48,14 @@ fn lookup_mask_optimized(
     ret
 }
 
-const fn build_vc_ok() -> [u16; 256] {
-    let mut t = [0u16; 256];
-    let mut m = 0usize;
-    while m < 256 {
-        let mut acc = 0u16;
-        let mut bits = m;
-        let mut b = 0usize;
-        while bits != 0 {
-            if bits & 1 != 0 && b < VC_ALLOWED_MASKS.len() {
-                acc |= VC_ALLOWED_MASKS[b];
-            }
-            bits >>= 1;
-            b += 1;
-        }
-        t[m] = acc;
-        m += 1;
-    }
-    t
-}
-
-/// `VC_OK[mask]` = OR of [`VC_ALLOWED_MASKS`] over the mask's set bits.
-/// Replaces the trailing-zeros loop in [`is_valid_vc`] with one load.
-/// Bits at index 8+ contribute nothing, exactly like the loop's guard.
-const VC_OK: [u16; 256] = build_vc_ok();
-
-#[inline(always)]
 const fn is_valid_vc(vo_mask: u16, lc_mask: u16) -> bool {
     (VC_OK[(vo_mask & 0xFF) as usize] & lc_mask) != 0
 }
 
-/// Validates a Vietnamese syllable based on its Consonant-Vowel-Consonant (CVC) structure.
-///
-/// # Arguments
-///
-/// * `fc` - First consonant(s).
-/// * `vo` - Vowel(s).
-/// * `lc` - Last consonant(s).
-/// * `full` - Whether the input is considered complete (affects strictness of matching).
+const fn is_valid_cv(fc_mask: u16, vo_mask: u16) -> bool {
+    (CV_OK[(fc_mask & 0x1F) as usize] & vo_mask) != 0
+}
+
 pub fn is_valid_cvc(fc: &str, vo: &str, lc: &str, full: bool) -> bool {
     let mut fc_chars = ['\0'; 8];
     let mut vo_chars = ['\0'; 8];
@@ -369,6 +121,10 @@ pub fn is_valid_cvc_chars(fc: &[char], vo: &[char], lc: &[char], full: bool) -> 
         {
             return true;
         }
+        return false;
+    }
+
+    if fc_mask != 0 && !is_valid_cv(fc_mask, vo_mask) {
         return false;
     }
 

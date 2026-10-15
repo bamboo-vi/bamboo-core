@@ -1,5 +1,6 @@
 //! Internal utility functions for Vietnamese syllable analysis and transformation generation.
 
+use super::tables::{TONE_ON_SECOND, TONE_PREFERRED, TONE_SECOND_ONSETS, UHO_PATTERNS};
 use crate::config::Config;
 use crate::engine::{MAX_ACTIVE_TRANS, Transformation, TransformationStack};
 use crate::flattener::flatten_slice;
@@ -297,8 +298,9 @@ fn find_tone_target(composition: &[Transformation], cvc: &Cvc, std_style: bool) 
         if has_u_horn && has_o_horn {
             let is_th_or_h = {
                 let fc = cvc.fc_slice();
-                (fc.len() == 2 && fc[0].key == 't' && fc[1].key == 'h')
-                    || (fc.len() == 1 && fc[0].key == 'h')
+                TONE_SECOND_ONSETS.iter().any(|onset| {
+                    fc.len() == onset.len() && fc.iter().zip(*onset).all(|(t, &c)| t.key == c)
+                })
             };
             target = Some(if !lc.is_empty() || is_th_or_h { vo_abs[1] } else { vo_abs[0] });
         } else {
@@ -306,7 +308,7 @@ fn find_tone_target(composition: &[Transformation], cvc: &Cvc, std_style: bool) 
             // undoing "oo"→"ô" on the first "o") does not steal the tone target.
             for &abs in vo_abs {
                 let base = add_tone_to_char(resolve_appended_char(composition, abs as usize), 0);
-                if matches!(base, 'ơ' | 'ê' | 'ô' | 'â' | 'ă') {
+                if TONE_PREFERRED.contains(&base) {
                     target = Some(abs);
                 }
             }
@@ -326,11 +328,8 @@ fn find_tone_target(composition: &[Transformation], cvc: &Cvc, std_style: bool) 
         let app_vowels = [composition[vo_abs[0] as usize], composition[vo_abs[1] as usize]];
         let mut raw = ['\0'; 4];
         let raw_len = raw_keys_of(&app_vowels, &mut raw);
-        let tone_on_second = raw_len == 2
-            && matches!(
-                (raw[0], raw[1]),
-                ('o', 'a') | ('o', 'e') | ('u', 'y') | ('u', 'e') | ('u', 'o')
-            );
+        let tone_on_second =
+            raw_len == 2 && TONE_ON_SECOND.iter().any(|&[a, b]| raw[0] == a && raw[1] == b);
         return Some(if tone_on_second { vo_abs[1] } else { vo_abs[0] });
     }
 
@@ -968,7 +967,7 @@ pub(crate) fn uho_tail_match_composition(composition: &[Transformation]) -> bool
     }
     for i in 0..len.saturating_sub(1) {
         let (c1, c2) = (chars[i], chars[i + 1]);
-        let is_pattern = (c1 == 'u' && c2 == 'ơ') || (c1 == 'ư' && c2 == 'o');
+        let is_pattern = UHO_PATTERNS.iter().any(|&(a, b)| c1 == a && c2 == b);
         if is_pattern && i + 2 < len && chars[i + 2].is_alphabetic() {
             return true;
         }
