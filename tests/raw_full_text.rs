@@ -1,7 +1,7 @@
 //! `FULL_TEXT` combined with other output options covers committed words too,
 //! like Go bamboo-core's `GetProcessedString(EnglishMode | FullText)`.
 
-use bamboo_core::{Engine, InputMethod, Mode, OutputOptions};
+use bamboo_core::{Engine, InputMethod, LastWordForm, Mode, OutputOptions};
 use std::borrow::Cow;
 
 const RAW_FULL: OutputOptions = OutputOptions::RAW.union(OutputOptions::FULL_TEXT);
@@ -67,10 +67,10 @@ fn edits_to_the_active_word_keep_raw_text_consistent() {
     assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), "tôi HIỂ");
     assert_eq!(e.get_processed_str(RAW_FULL), "tooi HIEER");
 
-    e.restore_last_word(false);
+    e.restore_last_word_as(LastWordForm::RawKeystrokes);
     assert_eq!(e.get_processed_str(RAW_FULL), "tooi HIEER");
 
-    e.remove_last_char(true);
+    e.undo_last_key();
     assert_eq!(
         e.get_processed_str(RAW_FULL),
         format!("tooi {}", e.get_processed_str(OutputOptions::RAW))
@@ -81,7 +81,7 @@ fn edits_to_the_active_word_keep_raw_text_consistent() {
 fn backspace_on_empty_active_leaves_committed_raw_text() {
     let mut e = typed("tooi ");
     e.remove_last_output_char();
-    e.remove_last_char(true);
+    e.undo_last_key();
     assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), "tôi ");
     assert_eq!(e.get_processed_str(RAW_FULL), "tooi ");
 }

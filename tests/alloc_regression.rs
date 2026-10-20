@@ -16,7 +16,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use bamboo_core::{Engine, InputMethodPreset, Mode, OutputOptions, RestoreMark};
+use bamboo_core::{Engine, InputMethodPreset, Mode, OutputOptions};
 use serial_test::serial;
 use std::borrow::Cow;
 use std::hint::black_box;
@@ -186,7 +186,7 @@ fn zero_alloc_remove_last_char() {
     let (n, _) = measure_allocs(|| {
         for _ in 0..20 {
             e.process_str("tieengs", Mode::Vietnamese);
-            e.remove_last_char(RestoreMark::Yes);
+            e.undo_last_key();
             black_box(e.output_str());
             e.commit();
         }
@@ -257,7 +257,7 @@ fn zero_alloc_process_key_delta() {
     let (n, _) = measure_allocs(|| {
         for _ in 0..50 {
             for ch in "vietj".chars() {
-                let d = e.process_key_delta(ch, Mode::Vietnamese);
+                let d = e.process_key_edit(ch, Mode::Vietnamese);
                 black_box(d);
             }
             e.commit();

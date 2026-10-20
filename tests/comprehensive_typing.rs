@@ -74,15 +74,15 @@ fn test_backspace_recovery() {
     // Test basic backspace
     engine.process_str("as", Mode::Vietnamese);
     assert_eq!(engine.output(), "á");
-    engine.remove_last_char(true);
+    engine.undo_last_key();
     assert_eq!(engine.output(), "a");
 
     // Test complex backspace (marks)
     engine.reset();
     engine.process_str("tieengs", Mode::Vietnamese);
     assert_eq!(engine.output(), "tiếng");
-    engine.remove_last_char(true); // removes 's'
+    engine.undo_last_key(); // removes 's'
     assert_eq!(engine.output(), "tiêng");
-    engine.remove_last_char(true); // removes 'g'
+    engine.undo_last_key(); // removes 'g'
     assert_eq!(engine.output(), "tiên");
 }

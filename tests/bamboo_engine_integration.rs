@@ -1,4 +1,4 @@
-use bamboo_core::{Engine, InputMethod, Mode, OutputOptions};
+use bamboo_core::{Engine, InputMethod, LastWordForm, Mode, OutputOptions};
 
 // --- Helpers ---
 fn test_input(im: InputMethod, input: &str, expected: &str) {
@@ -68,7 +68,7 @@ fn test_remove_last_char() {
     engine.process_str("chuyeenr", Mode::Vietnamese);
     assert_eq!(engine.output(), "chuyển");
 
-    engine.remove_last_char(true);
+    engine.undo_last_key();
     assert_eq!(engine.output(), "chuyên");
 }
 
@@ -94,7 +94,7 @@ fn test_is_valid_spelling() {
     let mut engine = Engine::new(InputMethod::telex());
 
     engine.process_str("tooi", Mode::Vietnamese);
-    assert!(engine.is_valid(false));
+    assert!(engine.is_valid_prefix());
 }
 
 #[test]
@@ -102,10 +102,10 @@ fn test_restore_last_word() {
     let mut engine = Engine::new(InputMethod::telex());
     engine.process_str("tieengs", Mode::Vietnamese);
 
-    engine.restore_last_word(false);
+    engine.restore_last_word_as(LastWordForm::RawKeystrokes);
     assert_eq!(engine.output(), "tieengs");
 
-    engine.restore_last_word(true);
+    engine.restore_last_word_as(LastWordForm::Vietnamese);
     assert_eq!(engine.output(), "tiếng");
 }
 

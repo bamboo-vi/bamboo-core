@@ -1,7 +1,7 @@
 //! `Engine::rebuild_from_text`, checked against the Go bamboo-core
 //! `RebuildEngineFromText` (rebuild_test.go and the same calls replayed on Go).
 
-use bamboo_core::{Config, Engine, InputMethod, Mode, OutputOptions};
+use bamboo_core::{Config, Engine, InputMethod, LastWordForm, Mode, OutputOptions};
 
 // The Go core has no auto-correct, so compare with it turned off.
 fn engine(im: InputMethod) -> Engine {
@@ -21,7 +21,7 @@ fn replay(im: InputMethod, text: &str, ops: &str) -> (String, String) {
     for op in ops.chars() {
         match op {
             '<' => e.remove_last_output_char(),
-            '!' => e.restore_last_word(false),
+            '!' => e.restore_last_word_as(LastWordForm::RawKeystrokes),
             k => e.process_key(k, Mode::Vietnamese),
         }
     }

@@ -2,7 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.5.0] - 2026-10-21
+
+### Migration
+
+- Replaced ambiguous behavioral booleans with named methods and enums. Existing callers
+  continue to compile, but should migrate before 1.0.0:
+  - `remove_last_char(true)` → `undo_last_key()` or
+    `undo_last_key_with(ToneRefresh::Recompute)`.
+  - `remove_last_char(false)` →
+    `undo_last_key_with(ToneRefresh::PreserveSnapshot)`.
+  - `restore_last_word(true/false)` →
+    `restore_last_word_as(LastWordForm::Vietnamese/RawKeystrokes)`.
+  - `is_valid(true/false)` → `is_valid_word()` / `is_valid_prefix()`.
+  - `std_tone_style(true/false)` →
+    `tone_style(ToneStyle::Modern/Traditional)`.
+  - `process_key_delta` / `process_key_delta_into` →
+    `process_key_edit` / `process_key_edit_into`.
+- `auto_correct(bool)` and `free_tone_marking(bool)` remain boolean switches because their
+  values have direct enabled/disabled meaning.
+
+### Added
+
+- Added named policy APIs that avoid ambiguous behavioral booleans: `undo_last_key`,
+  `undo_last_key_with(ToneRefresh)`, `restore_last_word_as(LastWordForm)`,
+  `is_valid_word`, `is_valid_prefix`, and `ConfigBuilder::tone_style(ToneStyle)`.
+- Added `process_key_edit`, returning an `EditDelta` with named deletion and insertion fields,
+  plus `process_key_edit_into` for caller-owned buffers.
+
+### Deprecated
+
+- Deprecated `remove_last_char`, `RestoreMark`, `restore_last_word(bool)`, `is_valid(bool)`,
+  `process_key_delta`, `process_key_delta_into`, and `ConfigBuilder::std_tone_style(bool)`.
+  Their `true` and `false` behavior is covered by compatibility tests; removal is planned
+  for 1.0.0.
 
 ## [0.4.1] - 2026-10-15
 

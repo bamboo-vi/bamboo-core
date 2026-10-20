@@ -158,7 +158,7 @@ fn main() {
         bench_single("backspace x1 (tieengs)", || {
             bp.reset();
             bp.process_str(input, Mode::Vietnamese);
-            bp.remove_last_char(true);
+            bp.undo_last_key();
         });
     }
 
@@ -171,7 +171,7 @@ fn main() {
         bench_single("delta API (tieengs, 7 keys)", || {
             bp.reset();
             for &k in &keys {
-                let _ = bp.process_key_delta(k, Mode::Vietnamese);
+                let _ = bp.process_key_edit(k, Mode::Vietnamese);
             }
         });
     }

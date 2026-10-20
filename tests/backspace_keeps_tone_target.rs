@@ -1,10 +1,10 @@
 // Expected outputs come from Go bamboo-core (RemoveLastChar) with the same keys and settings.
-use bamboo_core::{Config, Engine, InputMethod, Mode, RestoreMark};
+use bamboo_core::{Config, Engine, InputMethod, Mode, ToneRefresh, ToneStyle};
 
 fn engine(free_tone: bool, modern: bool) -> Engine {
     let config = Config::builder()
         .free_tone_marking(free_tone)
-        .std_tone_style(!modern)
+        .tone_style(if modern { ToneStyle::Traditional } else { ToneStyle::Modern })
         .auto_correct(false)
         .build();
     Engine::with_config(InputMethod::telex(), config)
@@ -42,7 +42,7 @@ fn undoing_a_key_keeps_the_tone_for_the_next_key() {
     for key in "craxyuk".chars() {
         engine.process_key(key, Mode::Vietnamese);
     }
-    engine.remove_last_char(RestoreMark::Yes);
+    engine.undo_last_key_with(ToneRefresh::Recompute);
     engine.process_key('n', Mode::Vietnamese);
     assert_eq!(engine.output(), "crãyun");
 }

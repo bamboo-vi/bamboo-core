@@ -4,7 +4,7 @@
 //! Source: `skey-engine/tests/{vseq_parity,parity,stress_test,cross_validate}.rs`
 //! Run with: `cargo test --test skey_parity -- --nocapture`
 
-use bamboo_core::{Config, Engine, InputMethod, Mode, RestoreMark};
+use bamboo_core::{Config, Engine, InputMethod, Mode, ToneStyle};
 
 /// One-shot Telex conversion (equivalent to `skey_engine::engine::convert_telex`).
 fn telex(input: &str) -> String {
@@ -15,7 +15,7 @@ fn telex(input: &str) -> String {
 
 /// Telex with modern (std) tone placement.
 fn telex_modern(input: &str) -> String {
-    let config = Config::builder().std_tone_style(true).build();
+    let config = Config::builder().tone_style(ToneStyle::Modern).build();
     let mut e = Engine::with_config(InputMethod::telex(), config);
     e.process_str(input, Mode::Vietnamese);
     e.output().into_owned()
@@ -440,7 +440,7 @@ fn backspace_restores_previous_state() {
             }
             // Backspace to `keep` characters.
             for _ in keep..chars.len() {
-                e.remove_last_char(RestoreMark::Yes);
+                e.undo_last_key();
             }
             // Compare with fresh engine typing the prefix.
             let mut expected_e = Engine::new(InputMethod::telex());

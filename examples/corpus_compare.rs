@@ -39,7 +39,11 @@ fn main() {
                 emit(&e.get_processed_str_cow(OutputOptions::NONE));
             }
             "backspace" => {
-                e.remove_last_char(true);
+                if arg == "grapheme" {
+                    e.remove_last_output_char();
+                } else {
+                    e.undo_last_key();
+                }
                 emit(&e.get_processed_str_cow(OutputOptions::NONE));
             }
             "commit" => {

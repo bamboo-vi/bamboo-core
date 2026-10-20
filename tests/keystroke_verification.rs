@@ -73,7 +73,7 @@ fn test_backspace_logic() {
     engine.process_str("tieen", Mode::Vietnamese);
     assert_eq!(engine.output(), "tiên");
 
-    engine.remove_last_char(true);
+    engine.undo_last_key();
     assert_eq!(engine.output(), "tiê"); // Xóa 'n'
 
     engine.process_key('s', Mode::Vietnamese);

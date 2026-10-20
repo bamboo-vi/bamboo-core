@@ -1,7 +1,20 @@
+#![allow(deprecated)]
+
 use crate::input_method::{EffectType, Rule, Tone};
 use std::mem::MaybeUninit;
 
-/// Options for restoring or refreshing tone targets when removing characters.
+/// Whether undoing a key recomputes the target of an existing tone mark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToneRefresh {
+    /// Recompute the tone target when the remaining syllable is valid.
+    #[default]
+    Recompute,
+    /// Preserve the exact tone target stored in the previous snapshot.
+    PreserveSnapshot,
+}
+
+/// Legacy option for refreshing tone targets when removing characters.
+#[deprecated(since = "0.5.0", note = "use ToneRefresh instead; planned removal in 1.0.0")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RestoreMark {
     /// Refresh the last tone target to maintain valid tone placement.
@@ -9,6 +22,16 @@ pub enum RestoreMark {
     Yes,
     /// Do not refresh the last tone target.
     No,
+}
+
+#[allow(deprecated)]
+impl From<RestoreMark> for ToneRefresh {
+    fn from(value: RestoreMark) -> Self {
+        match value {
+            RestoreMark::Yes => Self::Recompute,
+            RestoreMark::No => Self::PreserveSnapshot,
+        }
+    }
 }
 
 impl From<bool> for RestoreMark {

@@ -302,8 +302,8 @@ fn main() {
                 for &k in &keys {
                     bamboo.process_key(k, Mode::Vietnamese);
                 }
-                bamboo.remove_last_char(true);
-                bamboo.remove_last_char(true);
+                bamboo.undo_last_key();
+                bamboo.undo_last_key();
             },
             || {
                 for i in 1..=raw.len() {
@@ -343,7 +343,7 @@ fn main() {
                     bamboo.process_key(k, Mode::Vietnamese);
                 }
                 for _ in 0..5 {
-                    bamboo.remove_last_char(true);
+                    bamboo.undo_last_key();
                 }
             },
             || {
@@ -386,7 +386,7 @@ fn main() {
                     bamboo.process_key(k, Mode::Vietnamese);
                 }
                 for _ in 0..4 {
-                    bamboo.remove_last_char(true);
+                    bamboo.undo_last_key();
                 }
             },
             || {
@@ -429,7 +429,7 @@ fn main() {
                     bamboo.process_key(k, Mode::Vietnamese);
                 }
                 for _ in 0..9 {
-                    bamboo.remove_last_char(true);
+                    bamboo.undo_last_key();
                 }
             },
             || {
@@ -472,7 +472,7 @@ fn main() {
                     bamboo.process_key(k, Mode::Vietnamese);
                 }
                 for _ in 0..7 {
-                    bamboo.remove_last_char(true);
+                    bamboo.undo_last_key();
                 }
                 for &k in &k2 {
                     bamboo.process_key(k, Mode::Vietnamese);

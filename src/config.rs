@@ -34,6 +34,16 @@ pub enum BracketMode {
     Everywhere,
 }
 
+/// Placement style for tone marks on ambiguous vowel sequences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ToneStyle {
+    /// Modern placement (`hòa`, `khỏe`).
+    #[default]
+    Modern,
+    /// Traditional placement (`hoà`, `khoẻ`).
+    Traditional,
+}
+
 /// Configuration options for the Bamboo engine.
 ///
 /// Use [`Config::default()`] for the standard modern Vietnamese input setup,
@@ -41,11 +51,11 @@ pub enum BracketMode {
 ///
 /// # Example
 /// ```rust
-/// use bamboo_core::Config;
+/// use bamboo_core::{Config, ToneStyle};
 ///
 /// let config = Config::builder()
 ///     .free_tone_marking(true)
-///     .std_tone_style(true)
+///     .tone_style(ToneStyle::Modern)
 ///     .auto_correct(false)
 ///     .build();
 ///
@@ -108,6 +118,11 @@ impl Config {
     /// Returns a [`ConfigBuilder`] for constructing a custom configuration.
     pub const fn builder() -> ConfigBuilder {
         ConfigBuilder::new()
+    }
+
+    /// Returns the configured tone placement style.
+    pub const fn tone_style(self) -> ToneStyle {
+        if self.std_tone_style { ToneStyle::Modern } else { ToneStyle::Traditional }
     }
 
     /// Converts the configuration into an integer bitmask of flags.
@@ -194,8 +209,15 @@ impl ConfigBuilder {
     }
 
     /// Sets whether standard (new) tone style is enabled (`hòa` vs `hoà`).
+    #[deprecated(since = "0.5.0", note = "use tone_style(ToneStyle) instead")]
     pub const fn std_tone_style(mut self, enabled: bool) -> Self {
         self.config.std_tone_style = enabled;
+        self
+    }
+
+    /// Sets the tone placement style.
+    pub const fn tone_style(mut self, style: ToneStyle) -> Self {
+        self.config.std_tone_style = matches!(style, ToneStyle::Modern);
         self
     }
 
@@ -256,7 +278,7 @@ mod tests {
     fn config_builder() {
         let cfg = Config::builder()
             .free_tone_marking(false)
-            .std_tone_style(true)
+            .tone_style(ToneStyle::Modern)
             .auto_correct(false)
             .build();
 

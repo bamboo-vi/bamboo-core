@@ -42,8 +42,8 @@
 //! | Use Case | Primary API | Description |
 //! |---|---|---|
 //! | **IME Frontend (Fcitx5 / `IBus` / Native)** | [`Engine::process_key`], [`Engine::output`] | Feeds keys one-by-one, updates internal buffer, queries current composition word |
-//! | **Text Editor / Terminal / IDE** | [`Engine::process_key_delta`] | Returns a 3-way diff `(backspaces, bytes, inserted)` to replace only changed suffixes |
-//! | **Keystroke-level Backspace** | [`Engine::remove_last_char`] | $O(1)$ undo of the last physical keypress using stack snapshots |
+//! | **Text Editor / Terminal / IDE** | [`Engine::process_key_edit`] | Returns a named suffix edit to apply to the previous output |
+//! | **Keystroke-level Backspace** | [`Engine::undo_last_key`] | $O(1)$ undo of the last physical keypress using stack snapshots |
 //! | **Grapheme-level Backspace** | [`Engine::remove_last_output_char`] | Deletes preceding character while retaining marks/tones on remaining vowels (e.g. `tiếng` $\rightarrow$ `tiến`) |
 //! | **Word Finalization** | [`Engine::commit`] | Clears composing state and appends text to committed stream |
 //! | **Batch / Convenience (Testing)** | [`Engine::process`] | Processes a full string and returns output (**convenience only, not for real-time IME**) |
@@ -72,7 +72,7 @@
 //!
 //! Bamboo Core distinguishes two types of backspace actions:
 //!
-//! 1. **Canvas Backspace ([`Engine::remove_last_char`])**:
+//! 1. **Keystroke Backspace ([`Engine::undo_last_key`])**:
 //!    Undoes the single most recent keystroke transformation, reverting diacritic additions in reverse order.
 //!
 //!    ```rust
@@ -83,7 +83,7 @@
 //!    assert_eq!(engine.output(), "tiếng");
 //!
 //!    // Drops the tone mark 's', leaving the circumflex on 'ê'
-//!    engine.remove_last_char(true);
+//!    engine.undo_last_key();
 //!    assert_eq!(engine.output(), "tiêng");
 //!    ```
 //!
@@ -182,10 +182,14 @@ pub mod parallel {
     }
 }
 
-pub use config::{BracketMode, Config, ConfigBuilder, W2uMode};
+pub use config::{BracketMode, Config, ConfigBuilder, ToneStyle, W2uMode};
 pub(crate) use encoder::tables as charset_def;
 pub use encoder::{Charset, encode_charset};
-pub use engine::{Engine, EngineRules, RestoreMark, Transformation, TransformationStack};
+#[allow(deprecated)]
+pub use engine::{
+    EditDelta, Engine, EngineRules, LastWordForm, RestoreMark, ToneRefresh, Transformation,
+    TransformationStack,
+};
 pub(crate) use input_method::definitions as input_method_def;
 pub use input_method::{InputMethod, InputMethodPreset};
 pub use mode::{Mode, OutputOptions};

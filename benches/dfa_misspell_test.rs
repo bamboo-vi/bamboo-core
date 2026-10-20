@@ -95,9 +95,9 @@ fn main() {
     for i in 0..5000 {
         // Type valid word then backspace and retype
         e.process_str("tieengs", Mode::Vietnamese);
-        e.remove_last_char(true);
-        e.remove_last_char(true);
-        e.remove_last_char(true);
+        e.undo_last_key();
+        e.undo_last_key();
+        e.undo_last_key();
         e.process_str("xyz", Mode::Vietnamese);
         e.commit();
     }

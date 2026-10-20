@@ -1,7 +1,7 @@
 //! `[`, `]`, `{` and `}` type `ơ`, `ư`, `Ơ` and `Ư`, depending on `BracketMode`.
 //! Expected strings come from the Go bamboo-core used by fcitx5-lotus (`SetBracketTransformMode`).
 
-use bamboo_core::{BracketMode, Config, Engine, InputMethod, Mode, OutputOptions};
+use bamboo_core::{BracketMode, Config, Engine, InputMethod, Mode, OutputOptions, ToneStyle};
 
 // auto_correct would turn syllables such as `ơa` back into raw keys; Go leaves that to the caller.
 fn engine(im: InputMethod, mode: BracketMode) -> Engine {
@@ -148,7 +148,8 @@ fn can_process_key() {
 #[test]
 fn mode_survives_flags() {
     for mode in [BracketMode::Disabled, BracketMode::NonStart, BracketMode::Everywhere] {
-        let config = Config::builder().bracket_mode(mode).std_tone_style(false).build();
+        let config =
+            Config::builder().bracket_mode(mode).tone_style(ToneStyle::Traditional).build();
         assert_eq!(Config::from_flags(config.to_flags()), config);
     }
     assert_eq!(Config::from_flags(0x07 | 0x20).bracket_mode, BracketMode::NonStart);

@@ -3,7 +3,7 @@
 //! Run with `cargo bench --bench criterion_bench`.
 //! Reports are written to `target/criterion/`.
 
-use bamboo_core::{Engine, InputMethodPreset, Mode, RestoreMark};
+use bamboo_core::{Engine, InputMethodPreset, Mode};
 use criterion::{BenchmarkId, Criterion, criterion_group};
 use std::hint::black_box;
 
@@ -70,7 +70,7 @@ fn bench_delta(c: &mut Criterion) {
         let mut e = fresh_engine();
         b.iter(|| {
             for ch in "vietj".chars() {
-                let d = e.process_key_delta(black_box(ch), Mode::Vietnamese);
+                let d = e.process_key_edit(black_box(ch), Mode::Vietnamese);
                 black_box(d);
             }
         });
@@ -84,7 +84,7 @@ fn bench_backspace(c: &mut Criterion) {
         let mut e = warm_engine("tieengs");
         b.iter(|| {
             e.process_str("tieengs", Mode::Vietnamese);
-            e.remove_last_char(RestoreMark::Yes);
+            e.undo_last_key();
             black_box(e.output_str());
         });
     });
@@ -93,7 +93,7 @@ fn bench_backspace(c: &mut Criterion) {
         b.iter(|| {
             e.process_str("tieengs", Mode::Vietnamese);
             for _ in 0..3 {
-                e.remove_last_char(RestoreMark::Yes);
+                e.undo_last_key();
             }
             black_box(e.output_str());
         });

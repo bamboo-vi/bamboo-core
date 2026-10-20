@@ -103,7 +103,7 @@ fn bench_output() {
         || {
             bamboo.reset();
             for &k in &keys {
-                let _ = bamboo.process_key_delta(k, Mode::Vietnamese);
+                let _ = bamboo.process_key_edit(k, Mode::Vietnamese);
             }
         },
         || {
@@ -126,7 +126,7 @@ fn bench_backspace() {
         "backspace (tieengs)",
         || {
             bamboo.process_str("tieengs", Mode::Vietnamese);
-            bamboo.remove_last_char(true);
+            bamboo.undo_last_key();
             bamboo.reset();
         },
         || {
@@ -150,9 +150,9 @@ fn bench_backspace_3x() {
         "backspace x3 (tieengs)",
         || {
             bamboo.process_str("tieengs", Mode::Vietnamese);
-            bamboo.remove_last_char(true);
-            bamboo.remove_last_char(true);
-            bamboo.remove_last_char(true);
+            bamboo.undo_last_key();
+            bamboo.undo_last_key();
+            bamboo.undo_last_key();
             bamboo.reset();
         },
         || {
@@ -300,7 +300,7 @@ fn bench_backspace_spam() {
         || {
             bamboo.process_str("tieengs", Mode::Vietnamese);
             for _ in 0..7 {
-                bamboo.remove_last_char(true);
+                bamboo.undo_last_key();
             }
             bamboo.reset();
         },

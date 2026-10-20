@@ -37,12 +37,12 @@ fn backspace_after_overflow_cannot_cross_silent_commit() {
     let keys = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     let mut e = type_str(keys, Mode::Vietnamese);
     assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), keys);
-    e.remove_last_char(true);
+    e.undo_last_key();
     assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), &keys[..39]);
     // Undo drains the post-overflow keys but must stop at the silent commit:
     // committed text is not backspace-undoable (contract of `commit()`).
     for _ in 0..keys.len() {
-        e.remove_last_char(true);
+        e.undo_last_key();
     }
     assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), &keys[..32]);
 }
@@ -57,7 +57,7 @@ fn preedit_cache_matches_flatten_after_raw_append_and_edits() {
     assert_eq!(e.output_str(), e.get_processed_str(OutputOptions::FULL_TEXT));
 
     let mut v = type_str("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Mode::Vietnamese);
-    v.remove_last_char(true);
+    v.undo_last_key();
     let full = v.get_processed_str(OutputOptions::FULL_TEXT);
     assert_eq!(full, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
     // Preedit = the uncommitted tail after the 32-char silent commit.

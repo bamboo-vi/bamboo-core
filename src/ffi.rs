@@ -197,7 +197,8 @@ pub unsafe extern "C" fn bamboo_process_key_buf(
         return 0;
     };
 
-    let (bs_chars, bs_bytes, inserted) = e.process_key_delta(c, mode);
+    let edit = e.process_key_edit(c, mode);
+    let (bs_chars, bs_bytes, inserted) = (edit.delete_chars, edit.delete_bytes, edit.insert);
     let bytes = inserted.as_bytes();
 
     *out_len = bytes.len();
@@ -237,7 +238,7 @@ pub extern "C" fn bamboo_output() -> *mut c_char {
 /// Removes the last character from the current composition in the global engine.
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_remove_last_char() {
-    with_engine(|e| e.remove_last_char(true));
+    with_engine(Engine::undo_last_key);
 }
 
 /// Frees a string allocated by the engine and returned via FFI.
@@ -412,7 +413,8 @@ pub unsafe extern "C" fn bamboo_engine_process_key_buf(
         return 0;
     };
 
-    let (bs_chars, bs_bytes, inserted) = e.process_key_delta(c, mode);
+    let edit = e.process_key_edit(c, mode);
+    let (bs_chars, bs_bytes, inserted) = (edit.delete_chars, edit.delete_bytes, edit.insert);
     let bytes = inserted.as_bytes();
 
     *out_len = bytes.len();

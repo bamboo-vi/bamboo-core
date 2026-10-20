@@ -1,7 +1,7 @@
 //! `w` typed where it cannot mark a vowel becomes `ư`, depending on `W2uMode`.
 //! Expected strings come from the Go bamboo-core used by fcitx5-lotus (`SetW2UMode`).
 
-use bamboo_core::{Config, Engine, InputMethod, Mode, W2uMode};
+use bamboo_core::{Config, Engine, InputMethod, Mode, ToneStyle, W2uMode};
 
 // auto_correct would turn syllables such as `wơ` back into raw keys; Go leaves that to the caller.
 fn typed(im: InputMethod, mode: W2uMode, keys: &str) -> String {
@@ -102,7 +102,7 @@ fn vni() {
 #[test]
 fn mode_survives_flags() {
     for mode in [W2uMode::Disabled, W2uMode::NonStart, W2uMode::Everywhere] {
-        let config = Config::builder().w2u_mode(mode).std_tone_style(false).build();
+        let config = Config::builder().w2u_mode(mode).tone_style(ToneStyle::Traditional).build();
         assert_eq!(Config::from_flags(config.to_flags()), config);
     }
 }

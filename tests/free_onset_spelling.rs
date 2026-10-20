@@ -4,7 +4,7 @@ fn check(typed: &str, want: &str, want_valid: bool) {
     let mut engine = Engine::new(InputMethod::telex());
     engine.process_str(typed, Mode::Vietnamese);
     assert_eq!(engine.output(), want, "typed {typed:?}");
-    assert_eq!(engine.is_valid(true), want_valid, "is_valid(true) for {typed:?}");
+    assert_eq!(engine.is_valid_word(), want_valid, "is_valid_word() for {typed:?}");
 }
 
 #[test]

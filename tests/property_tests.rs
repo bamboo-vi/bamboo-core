@@ -1,4 +1,4 @@
-use bamboo_core::{Config, Engine, InputMethod, InputMethodPreset, Mode, RestoreMark};
+use bamboo_core::{Config, Engine, InputMethod, InputMethodPreset, Mode, ToneRefresh, ToneStyle};
 use proptest::prelude::*;
 
 proptest! {
@@ -33,7 +33,7 @@ proptest! {
 
         for ch in keys.chars() {
             engine_direct.process_key(ch, Mode::Vietnamese);
-            let _delta = engine_delta.process_key_delta(ch, Mode::Vietnamese);
+            let _edit = engine_delta.process_key_edit(ch, Mode::Vietnamese);
 
             prop_assert_eq!(engine_direct.output(), engine_delta.output());
         }
@@ -61,7 +61,7 @@ proptest! {
 
         // Deleting characters up to typed count should never panic and should leave buffer clean
         for _ in 0..count {
-            engine.remove_last_char(RestoreMark::No);
+            engine.undo_last_key_with(ToneRefresh::PreserveSnapshot);
         }
         prop_assert_eq!(engine.output_str(), "");
     }
@@ -75,7 +75,11 @@ proptest! {
     ) {
         let config = Config::builder()
             .auto_correct(auto_correct)
-            .std_tone_style(std_tone_style)
+            .tone_style(if std_tone_style {
+                ToneStyle::Modern
+            } else {
+                ToneStyle::Traditional
+            })
             .free_tone_marking(free_marking)
             .build();
 

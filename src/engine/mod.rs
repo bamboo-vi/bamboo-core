@@ -16,9 +16,22 @@ pub mod rules;
 pub mod snapshot;
 pub mod state;
 
+pub use restore::LastWordForm;
 pub use rules::EngineRules;
 use snapshot::{FLAG_ENGLISH_BYPASS, FLAG_NEEDS_BUFFER, Snapshot};
-pub use state::{MAX_ACTIVE_TRANS, RestoreMark, Transformation, TransformationStack};
+#[allow(deprecated)]
+pub use state::{MAX_ACTIVE_TRANS, RestoreMark, ToneRefresh, Transformation, TransformationStack};
+
+/// Minimal suffix edit produced by processing one key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditDelta<'a> {
+    /// Number of Unicode scalar values to delete from the previous output suffix.
+    pub delete_chars: usize,
+    /// Number of UTF-8 bytes occupied by that deleted suffix.
+    pub delete_bytes: usize,
+    /// Replacement suffix to insert after the deletion.
+    pub insert: &'a str,
+}
 
 /// The main stateful processor of the Vietnamese Input Method Engine.
 ///
@@ -557,7 +570,7 @@ impl Engine {
     ///
     /// This method is primarily intended for **testing and convenience purposes**.
     /// For production IME integration, use:
-    /// - [`process_key`](Self::process_key) or [`process_key_delta`](Self::process_key_delta) for real-time input
+    /// - [`process_key`](Self::process_key) or [`process_key_edit`](Self::process_key_edit) for real-time input
     /// - [`process_str`](Self::process_str) + [`output`](Self::output) for batch processing
     ///
     /// This method may be deprecated or removed in a future version.
@@ -650,18 +663,18 @@ impl Engine {
     ///
     /// let mut engine = Engine::new(InputMethod::telex());
     ///
-    /// let (bs, _, ins) = engine.process_key_delta('a', Mode::Vietnamese);
-    /// assert_eq!(bs, 0);
-    /// assert_eq!(ins, "a");
+    /// let edit = engine.process_key_edit('a', Mode::Vietnamese);
+    /// assert_eq!(edit.delete_chars, 0);
+    /// assert_eq!(edit.insert, "a");
     ///
-    /// let (bs, _, ins) = engine.process_key_delta('s', Mode::Vietnamese);
+    /// let edit = engine.process_key_edit('s', Mode::Vietnamese);
     /// // previous = "a", new = "á"
     /// // keep prefix = 1 - 1 = 0, delete = 1 ("a"), insert = "á"
-    /// assert_eq!(bs, 1);
-    /// assert_eq!(ins, "á");
+    /// assert_eq!(edit.delete_chars, 1);
+    /// assert_eq!(edit.insert, "á");
     /// ```
     #[must_use]
-    pub fn process_key_delta(&mut self, key: char, mode: Mode) -> (usize, usize, &str) {
+    pub fn process_key_edit(&mut self, key: char, mode: Mode) -> EditDelta<'_> {
         self.process_key(key, mode);
 
         let (_prefix_len, lcp_bytes) =
@@ -677,13 +690,41 @@ impl Engine {
         self.delta_buf.push_str(&self.cached_output);
         std::mem::swap(&mut self.prev_preedit, &mut self.delta_buf);
         let inserted_suffix = &self.prev_preedit[lcp_bytes..];
-        (backspace_count, backspaces_bytes, inserted_suffix)
+        EditDelta {
+            delete_chars: backspace_count,
+            delete_bytes: backspaces_bytes,
+            insert: inserted_suffix,
+        }
     }
 
-    /// Similar to [`Self::process_key_delta`], but writes the inserted string into a provided buffer.
+    /// Processes one key and returns the changed output suffix as a legacy tuple.
+    #[deprecated(
+        since = "0.5.0",
+        note = "use process_key_edit() and named EditDelta fields instead; planned removal in 1.0.0"
+    )]
+    #[must_use]
+    pub fn process_key_delta(&mut self, key: char, mode: Mode) -> (usize, usize, &str) {
+        let edit = self.process_key_edit(key, mode);
+        (edit.delete_chars, edit.delete_bytes, edit.insert)
+    }
+
+    /// Similar to [`Self::process_key_edit`], but writes the inserted string into a provided buffer.
     ///
     /// # Returns
     /// `backspace_count` — number of characters to delete from the end of the previous preedit.
+    #[must_use]
+    pub fn process_key_edit_into(&mut self, key: char, mode: Mode, inserted: &mut String) -> usize {
+        let edit = self.process_key_edit(key, mode);
+        inserted.clear();
+        inserted.push_str(edit.insert);
+        edit.delete_chars
+    }
+
+    /// Processes one key into a caller-provided insertion buffer using the legacy name.
+    #[deprecated(
+        since = "0.5.0",
+        note = "use process_key_edit_into() instead; planned removal in 1.0.0"
+    )]
     #[must_use]
     pub fn process_key_delta_into(
         &mut self,
@@ -691,10 +732,7 @@ impl Engine {
         mode: Mode,
         inserted: &mut String,
     ) -> usize {
-        let (backspace_count, _backspaces_bytes, ins) = self.process_key_delta(key, mode);
-        inserted.clear();
-        inserted.push_str(ins);
-        backspace_count
+        self.process_key_edit_into(key, mode, inserted)
     }
 
     /// Processes a single character.
@@ -1111,7 +1149,23 @@ impl Engine {
         self.get_processed_str_cow(options).into_owned()
     }
 
-    /// Checks if the current composition forms a valid Vietnamese syllable.
+    /// Checks if the current composition forms a complete Vietnamese syllable.
+    #[must_use]
+    pub fn is_valid_word(&self) -> bool {
+        self.is_valid_internal(self.active_slice(), true)
+    }
+
+    /// Checks if the current composition is a valid, potentially incomplete syllable prefix.
+    #[must_use]
+    pub fn is_valid_prefix(&self) -> bool {
+        self.is_valid_internal(self.active_slice(), false)
+    }
+
+    /// Checks syllable validity using the legacy completeness boolean.
+    #[deprecated(
+        since = "0.5.0",
+        note = "use is_valid_word() or is_valid_prefix() instead; planned removal in 1.0.0"
+    )]
     #[must_use]
     pub fn is_valid(&self, input_is_full_complete: bool) -> bool {
         self.is_valid_internal(self.active_slice(), input_is_full_complete)
@@ -1130,7 +1184,7 @@ impl Engine {
                 .active_slice()
                 .iter()
                 .any(|t| t.effect_type == EffectType::ToneTransformation && t.has_target())
-            && self.is_valid(false)
+            && self.is_valid_prefix()
     }
 
     fn is_valid_internal(
@@ -1141,14 +1195,33 @@ impl Engine {
         crate::syllable::is_valid(composition, input_is_full_complete)
     }
 
-    /// Removes the last character from the active composition.
+    /// Undoes the most recent physical key and recomputes the tone target when appropriate.
+    pub fn undo_last_key(&mut self) {
+        self.undo_last_key_with(ToneRefresh::Recompute);
+    }
+
+    /// Undoes the most recent physical key using an explicit tone refresh policy.
+    pub fn undo_last_key_with(&mut self, tone_refresh: ToneRefresh) {
+        self.undo_last_key_impl(tone_refresh);
+    }
+
+    /// Removes the last key using the legacy tone refresh option.
+    #[deprecated(
+        since = "0.5.0",
+        note = "use undo_last_key() or undo_last_key_with(ToneRefresh) instead; planned removal in 1.0.0"
+    )]
+    #[allow(deprecated)]
     pub fn remove_last_char(&mut self, restore_mark: impl Into<RestoreMark>) {
+        let refresh = ToneRefresh::from(restore_mark.into());
+        self.undo_last_key_impl(refresh);
+    }
+
+    fn undo_last_key_impl(&mut self, tone_refresh: ToneRefresh) {
         if self.pop_snapshot().is_none() {
             return;
         }
 
-        let restore_mark: RestoreMark = restore_mark.into();
-        let refresh_last_tone_target = matches!(restore_mark, RestoreMark::Yes);
+        let refresh_last_tone_target = matches!(tone_refresh, ToneRefresh::Recompute);
 
         if refresh_last_tone_target && self.may_move_tone() {
             crate::syllable::refresh_last_tone_target_into(
@@ -1203,7 +1276,7 @@ impl Engine {
         }
         // Deleting back to a valid word ("eete" -> "et") lets the next key
         // add marks again, as if the invalid part was never typed.
-        if self.english_bypass && self.is_valid(false) {
+        if self.english_bypass && self.is_valid_prefix() {
             self.english_bypass = false;
         }
         // Compaction shifts case bits: recompute directly (cold path).
@@ -1337,17 +1410,17 @@ mod tests {
         let telex = InputMethod::telex();
         let mut e = Engine::new(telex);
 
-        let (bs1, _bb1, ins1) = e.process_key_delta('a', Mode::Vietnamese);
-        assert_eq!(bs1, 0, "First 'a' should have 0 backspaces");
-        assert_eq!(ins1, "a");
+        let edit1 = e.process_key_edit('a', Mode::Vietnamese);
+        assert_eq!(edit1.delete_chars, 0, "First 'a' should have 0 backspaces");
+        assert_eq!(edit1.insert, "a");
 
-        let (bs2, _bb2, ins2) = e.process_key_delta('s', Mode::Vietnamese);
-        assert_eq!(bs2, 1, "Adding 's' to 'a' should have 1 backspace for 'á'");
-        assert_eq!(ins2, "á");
+        let edit2 = e.process_key_edit('s', Mode::Vietnamese);
+        assert_eq!(edit2.delete_chars, 1, "Adding 's' to 'a' should have 1 backspace for 'á'");
+        assert_eq!(edit2.insert, "á");
 
-        let (bs3, _bb3, ins3) = e.process_key_delta(' ', Mode::Vietnamese);
-        assert_eq!(bs3, 1, "Space should clear the preedit 'á'");
-        assert_eq!(ins3, "");
+        let edit3 = e.process_key_edit(' ', Mode::Vietnamese);
+        assert_eq!(edit3.delete_chars, 1, "Space should clear the preedit 'á'");
+        assert_eq!(edit3.insert, "");
     }
 
     #[test]
@@ -1435,7 +1508,7 @@ mod tests {
         assert_eq!(e.output(), "tiến");
 
         // remove_last_char must not "undo" past the grapheme delete to a stale snapshot.
-        e.remove_last_char(true);
+        e.undo_last_key();
         assert_eq!(e.output(), "tiến");
     }
 

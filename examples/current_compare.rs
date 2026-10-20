@@ -76,6 +76,6 @@ fn main() {
     println!("SIZE\t{}", std::mem::size_of::<Engine>());
     let mut e = engine("telex");
     e.process_str("tieengs", Mode::Vietnamese);
-    e.remove_last_char(true);
+    e.undo_last_key();
     println!("BACKSPACE\ttieengs\t{}", e.output_str());
 }

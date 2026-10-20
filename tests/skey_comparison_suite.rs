@@ -1,4 +1,4 @@
-use bamboo_core::{Config, Engine, InputMethod, Mode, OutputOptions};
+use bamboo_core::{Config, Engine, InputMethod, Mode, OutputOptions, ToneRefresh};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TestMethod {
@@ -101,7 +101,7 @@ fn execute_backspace_test(bt: &BackspaceTest) -> Result<(), String> {
     feed_keys(&mut engine, bt.keys);
 
     for _ in 0..bt.backspace_count {
-        engine.remove_last_char(false);
+        engine.undo_last_key_with(ToneRefresh::PreserveSnapshot);
     }
 
     let actual = engine.get_processed_str(OutputOptions::FULL_TEXT);

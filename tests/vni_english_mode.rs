@@ -3,7 +3,7 @@
 //! in the word (as in the Go bamboo-core) so restore, raw output and backspace
 //! still see the whole word.
 
-use bamboo_core::{Config, Engine, InputMethod, Mode, OutputOptions};
+use bamboo_core::{Config, Engine, InputMethod, LastWordForm, Mode, OutputOptions};
 
 /// Types `keys` the way an IME wrapper does: Vietnamese until the word stops
 /// being valid, English afterwards. `<` deletes the last output character.
@@ -14,7 +14,7 @@ fn type_like_wrapper(engine: &mut Engine, keys: &str) {
             continue;
         }
         let vn = engine.get_processed_str(OutputOptions::LOWER_CASE);
-        let mode = if !vn.is_empty() && !engine.is_valid(false) {
+        let mode = if !vn.is_empty() && !engine.is_valid_prefix() {
             Mode::English
         } else {
             Mode::Vietnamese
@@ -42,7 +42,7 @@ fn vni_digit_in_english_mode_stays_in_word_for_restore() {
     type_like_wrapper(&mut e, "e6ng2");
     assert_eq!(full_text(&e), "êng2");
     assert_eq!(raw(&e), "e6ng2");
-    e.restore_last_word(false);
+    e.restore_last_word_as(LastWordForm::RawKeystrokes);
     assert_eq!(full_text(&e), "e6ng2");
 }
 
