@@ -181,31 +181,37 @@ static VIQR_CODES: LazyLock<FxHashSet<&'static str>> = LazyLock::new(|| {
 });
 
 fn encode_viqr<'a>(charset_def: &CharsetDefinition, input: &'a str) -> Cow<'a, str> {
-    let mut output = String::with_capacity(input.len());
-    let mut changed = false;
-    let mut last_code = 0;
-    for char in input.chars() {
-        let start = output.len();
-        let escape = char == '\\'
-            || (char.is_ascii_punctuation() && {
-                let mut joined = String::from(&output[last_code..]);
-                joined.push(char);
-                VIQR_CODES.contains(joined.as_str())
-            });
-        if escape {
-            output.push('\\');
-            changed = true;
-        }
-        match charset_def.get(&char).filter(|_| !char.is_ascii()) {
-            Some(encoded) => {
-                output.push_str(encoded);
-                changed = true;
+    let mut output: Option<String> = None;
+    let mut prev_code = "";
+    for (i, char) in input.char_indices() {
+        let found = charset_def.get(&char).copied().filter(|_| !char.is_ascii());
+        let code = found.unwrap_or_else(|| &input[i..i + char.len_utf8()]);
+        let escape =
+            char == '\\' || (char.is_ascii_punctuation() && joins_viqr_code(prev_code, char));
+        if found.is_some() || escape {
+            let out = output.get_or_insert_with(|| input[..i].to_string());
+            if escape {
+                out.push('\\');
             }
-            None => output.push(char),
+            out.push_str(code);
+        } else if let Some(out) = output.as_mut() {
+            out.push(char);
         }
-        last_code = start;
+        // An escaped character stands alone, so nothing can join it.
+        prev_code = if escape { "" } else { code };
     }
-    if changed { Cow::Owned(output) } else { Cow::Borrowed(input) }
+    output.map_or(Cow::Borrowed(input), Cow::Owned)
+}
+
+fn joins_viqr_code(prev_code: &str, mark: char) -> bool {
+    let mut buf = [0u8; 4];
+    let len = prev_code.len();
+    if len >= buf.len() {
+        return false;
+    }
+    buf[..len].copy_from_slice(prev_code.as_bytes());
+    buf[len] = mark as u8;
+    std::str::from_utf8(&buf[..=len]).is_ok_and(|joined| VIQR_CODES.contains(joined))
 }
 
 /// Encodes a Vietnamese Unicode string into a specific character set by string name.
@@ -312,8 +318,11 @@ mod tests {
             ("a(", "a\\("),
             ("o+", "o\\+"),
             ("a\\b", "a\\\\b"),
+            ("\u{1b0}.", "u+\\."),
+            ("a..", "a\\.."),
             // Nothing to join: a toned letter takes no second tone.
             ("\u{1ea5}.", "a^'."),
+            ("\u{1ea1}.", "a.."),
             ("\u{ea}^", "e^^"),
             ("x.", "x."),
             ("a .", "a ."),
