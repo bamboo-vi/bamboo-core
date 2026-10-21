@@ -253,4 +253,20 @@ mod tests {
         assert_eq!(res_viqr, "tie^'ng Vie^.t");
         assert!(matches!(res_viqr, Cow::Owned(_)));
     }
+
+    #[test]
+    fn test_windows_1258_matches_the_codepage() {
+        // Bytes DD EC and D0, as glibc iconv writes them, shown as cp1252 like the rest of the table.
+        assert_eq!(encode_charset(Charset::Windows1258, "Ứ"), "Ýì");
+        assert_eq!(encode_charset(Charset::Windows1258, "Đ"), "\u{D0}");
+
+        // Every code must be bytes of the codepage, i.e. characters cp1252 can show.
+        let cp1252_high = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ";
+        let def = get_charset_definition(Charset::Windows1258.as_str()).unwrap();
+        for (letter, code) in def.entries() {
+            for c in code.chars() {
+                assert!(c <= '\u{FF}' || cp1252_high.contains(c), "{letter} => {code:?}");
+            }
+        }
+    }
 }
