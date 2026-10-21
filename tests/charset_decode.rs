@@ -109,6 +109,16 @@ fn documented_limits() {
 }
 
 #[test]
+fn decodes_viqr_escapes() {
+    // UniKey's VIQR output for "mưa.", "Hà Nội?" and "a\b".
+    assert_eq!(decode_charset(Charset::Viqr, "mu+a\\."), "mưa.");
+    assert_eq!(decode_charset(Charset::Viqr, "Ha` No^.i\\?"), "Hà Nội?");
+    assert_eq!(decode_charset(Charset::Viqr, "a\\\\b"), "a\\b");
+    // A backslash before anything else is not an escape.
+    assert_eq!(decode_charset(Charset::Viqr, "C:\\new"), "C:\\new");
+}
+
+#[test]
 fn decodes_viscii_capitals_on_control_codes() {
     // Bytes 02 05 06 A0 14 19 1E, as glibc iconv writes these capitals in VISCII.
     let viscii = "\u{2}\u{5}\u{6}\u{a0}\u{14}\u{19}\u{1e}";

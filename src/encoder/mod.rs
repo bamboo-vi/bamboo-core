@@ -279,7 +279,8 @@ fn build_decode_table(
 ///   although [`encode_charset`] writes the lowercase codes for them. A code shared by two different letters (`Ặ` and
 ///   `Ụ` in BKHCM 1) is left undecoded.
 /// - Charsets that use ASCII for letters also decode ASCII text that happens to match: VIQR
-///   (`dd` becomes `đ`, a full stop after a vowel becomes a dot below), NCR, C string, and
+///   (`dd` becomes `đ`, a full stop after a vowel becomes a dot below unless written `\.`,
+///   the VIQR escape), NCR, C string, and
 ///   BKHCM 1, which encodes `Đ Ấ Ý Ỳ Ỷ Ỹ` as `}`, `~`, `{`, `^`, `` ` `` and `|`.
 /// - [`Charset::UnicodeCompound`] is the letter with its hat or horn plus a combining tone
 ///   mark, as [`encode_charset`] writes it, not full NFD.
@@ -303,6 +304,14 @@ pub fn decode_charset<'a>(charset: Charset, input: &'a str) -> Cow<'a, str> {
     while i < input.len() {
         let rest = &input[i..];
         let first = rest.chars().next().unwrap_or_default();
+        if charset == Charset::Viqr
+            && first == '\\'
+            && let Some(next) = rest[1..].chars().next().filter(char::is_ascii_punctuation)
+        {
+            output.get_or_insert_with(|| input[..i].to_string()).push(next);
+            i += 1 + next.len_utf8();
+            continue;
+        }
         let found = (1..=table.max_len.min(rest.len()))
             .filter(|_| table.starts.contains(&first))
             .rev()
