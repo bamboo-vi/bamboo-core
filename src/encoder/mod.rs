@@ -216,19 +216,38 @@ struct DecodeTable {
     max_len: usize,
 }
 
+// Capitals VISCII puts on control codes and 0xA0. The encode table folds them into lowercase so
+// typing never sends control characters, but real VISCII files contain them.
+const VISCII_CAPITALS: [(&str, char); 7] = [
+    ("\u{2}", 'Ẳ'),
+    ("\u{5}", 'Ẵ'),
+    ("\u{6}", 'Ẫ'),
+    ("\u{14}", 'Ỷ'),
+    ("\u{19}", 'Ỹ'),
+    ("\u{1e}", 'Ỵ'),
+    ("\u{a0}", 'Õ'),
+];
+
 static DECODE_TABLES: LazyLock<FxHashMap<&'static str, DecodeTable>> = LazyLock::new(|| {
     get_charset_definitions()
         .entries()
-        .map(|(name, def)| (*name, build_decode_table(def)))
+        .map(|(&name, def)| {
+            let extra: &[(&str, char)] =
+                if name == Charset::Viscii.as_str() { &VISCII_CAPITALS } else { &[] };
+            (name, build_decode_table(def, extra))
+        })
         .collect()
 });
 
-fn build_decode_table(def: &tables::CharsetDefinition) -> DecodeTable {
+fn build_decode_table(
+    def: &tables::CharsetDefinition,
+    extra: &[(&'static str, char)],
+) -> DecodeTable {
     let mut groups: FxHashMap<&'static str, Vec<char>> = FxHashMap::default();
     for (&c, &encoded) in def.entries() {
         groups.entry(encoded).or_default().push(c);
     }
-    let chars: FxHashMap<&'static str, char> = groups
+    let mut chars: FxHashMap<&'static str, char> = groups
         .into_iter()
         .filter_map(|(encoded, letters)| match letters[..] {
             [c] => Some((encoded, c)),
@@ -240,6 +259,7 @@ fn build_decode_table(def: &tables::CharsetDefinition) -> DecodeTable {
             _ => None,
         })
         .collect();
+    chars.extend(extra.iter().copied());
     let starts = chars.keys().filter_map(|k| k.chars().next()).collect();
     let max_len = chars.keys().map(|k| k.len()).max().unwrap_or(0);
     DecodeTable { chars, starts, max_len }
@@ -254,8 +274,9 @@ fn build_decode_table(def: &tables::CharsetDefinition) -> DecodeTable {
 ///
 /// Some limits come from the charsets themselves:
 /// - TCVN3 (ABC) and Vietware Full use the same code for most lowercase and uppercase toned
-///   vowels and relied on a separate font for capitals; VPS and VISCII lack some capitals.
-///   Such shared codes decode to lowercase. A code shared by two different letters (`Ặ` and
+///   vowels and relied on a separate font for capitals; VPS lacks some capitals. Such shared
+///   codes decode to lowercase. VISCII's own codes for `Ẳ Ẵ Ẫ Õ Ỷ Ỹ Ỵ` decode to capitals,
+///   although [`encode_charset`] writes the lowercase codes for them. A code shared by two different letters (`Ặ` and
 ///   `Ụ` in BKHCM 1) is left undecoded.
 /// - Charsets that use ASCII for letters also decode ASCII text that happens to match: VIQR
 ///   (`dd` becomes `đ`, a full stop after a vowel becomes a dot below), NCR, C string, and

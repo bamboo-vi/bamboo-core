@@ -109,6 +109,14 @@ fn documented_limits() {
 }
 
 #[test]
+fn decodes_viscii_capitals_on_control_codes() {
+    // Bytes 02 05 06 A0 14 19 1E, as glibc iconv writes these capitals in VISCII.
+    let viscii = "\u{2}\u{5}\u{6}\u{a0}\u{14}\u{19}\u{1e}";
+    assert_eq!(decode_charset(Charset::Viscii, viscii), "ẲẴẪÕỶỸỴ");
+    assert_eq!(decode_charset(Charset::Tcvn3, viscii), viscii);
+}
+
+#[test]
 fn decodes_known_legacy_text() {
     assert_eq!(decode_charset(Charset::VniWindows, "tieáng Vieät"), "tiếng Việt");
     assert_eq!(decode_charset(Charset::Viqr, "tie^'ng Vie^.t"), "tiếng Việt");
