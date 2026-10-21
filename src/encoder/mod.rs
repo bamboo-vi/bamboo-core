@@ -17,8 +17,10 @@
 
 pub mod tables;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::LazyLock;
 pub use tables::{get_charset_definition, get_charset_definitions};
 
 static UNICODE: &str = "Unicode";
@@ -205,6 +207,87 @@ pub fn encode(charset_name: &str, input: &str) -> String {
         }
         None => input.to_string(),
     }
+}
+
+struct DecodeTable {
+    chars: HashMap<&'static str, char>,
+    max_len: usize,
+}
+
+static DECODE_TABLES: LazyLock<HashMap<&'static str, DecodeTable>> = LazyLock::new(|| {
+    get_charset_definitions()
+        .entries()
+        .map(|(name, def)| (*name, build_decode_table(def)))
+        .collect()
+});
+
+fn build_decode_table(def: &tables::CharsetDefinition) -> DecodeTable {
+    let mut chars: HashMap<&'static str, char> = HashMap::new();
+    for (&c, &encoded) in def.entries() {
+        chars
+            .entry(encoded)
+            .and_modify(|kept| {
+                // TCVN3 shares codes between cases; the font, lost on copy, told them apart.
+                if (!c.is_lowercase(), c) < (!kept.is_lowercase(), *kept) {
+                    *kept = c;
+                }
+            })
+            .or_insert(c);
+    }
+    let max_len = chars.keys().map(|k| k.len()).max().unwrap_or(0);
+    DecodeTable { chars, max_len }
+}
+
+/// Decodes text in a legacy [`Charset`] back into Unicode; the inverse of [`encode_charset`].
+///
+/// Sequences are matched longest first, so multi-character encodings such as VNI `eá` or
+/// VIQR `e^'` decode to one letter. Anything that is not an encoded sequence passes through.
+///
+/// Returns [`Cow::Borrowed`] when nothing in `input` needs decoding.
+///
+/// Two limits come from the charsets themselves:
+/// - TCVN3 (ABC) uses the same code for most lowercase and uppercase toned vowels and relied on
+///   a separate font for capitals, so those codes decode to lowercase.
+/// - Charsets built from ASCII (VIQR, NCR, C string) also decode ASCII text that happens to
+///   match, e.g. VIQR `dd` becomes `đ`.
+///
+/// # Example
+/// ```rust
+/// use bamboo_core::{decode_charset, encode_charset, Charset};
+///
+/// assert_eq!(decode_charset(Charset::VniWindows, "tieáng Vieät"), "tiếng Việt");
+///
+/// let viqr = encode_charset(Charset::Viqr, "tiếng Việt");
+/// assert_eq!(decode_charset(Charset::Viqr, &viqr), "tiếng Việt");
+/// ```
+pub fn decode_charset<'a>(charset: Charset, input: &'a str) -> Cow<'a, str> {
+    let Some(table) = DECODE_TABLES.get(charset.as_str()) else {
+        return Cow::Borrowed(input);
+    };
+
+    let mut output: Option<String> = None;
+    let mut i = 0;
+    while i < input.len() {
+        let rest = &input[i..];
+        let found = (1..=table.max_len.min(rest.len()))
+            .rev()
+            .filter(|&len| rest.is_char_boundary(len))
+            .find_map(|len| table.chars.get(&rest[..len]).map(|&c| (c, len)));
+        match found {
+            Some((c, len)) if output.is_some() || rest[..len].chars().ne(std::iter::once(c)) => {
+                output.get_or_insert_with(|| input[..i].to_string()).push(c);
+                i += len;
+            }
+            _ => {
+                let c = rest.chars().next().unwrap_or_default();
+                if let Some(out) = output.as_mut() {
+                    out.push(c);
+                }
+                i += c.len_utf8();
+            }
+        }
+    }
+    output.map_or(Cow::Borrowed(input), Cow::Owned)
 }
 
 /// Returns an iterator over all supported character set names without heap allocations.
