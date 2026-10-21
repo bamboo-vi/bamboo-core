@@ -17,10 +17,11 @@
 
 pub mod tables;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 use std::sync::LazyLock;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 pub use tables::{get_charset_definition, get_charset_definitions};
 
 static UNICODE: &str = "Unicode";
@@ -210,11 +211,12 @@ pub fn encode(charset_name: &str, input: &str) -> String {
 }
 
 struct DecodeTable {
-    chars: HashMap<&'static str, char>,
+    chars: FxHashMap<&'static str, char>,
+    starts: FxHashSet<char>,
     max_len: usize,
 }
 
-static DECODE_TABLES: LazyLock<HashMap<&'static str, DecodeTable>> = LazyLock::new(|| {
+static DECODE_TABLES: LazyLock<FxHashMap<&'static str, DecodeTable>> = LazyLock::new(|| {
     get_charset_definitions()
         .entries()
         .map(|(name, def)| (*name, build_decode_table(def)))
@@ -222,20 +224,25 @@ static DECODE_TABLES: LazyLock<HashMap<&'static str, DecodeTable>> = LazyLock::n
 });
 
 fn build_decode_table(def: &tables::CharsetDefinition) -> DecodeTable {
-    let mut chars: HashMap<&'static str, char> = HashMap::new();
+    let mut groups: FxHashMap<&'static str, Vec<char>> = FxHashMap::default();
     for (&c, &encoded) in def.entries() {
-        chars
-            .entry(encoded)
-            .and_modify(|kept| {
-                // TCVN3 shares codes between cases; the font, lost on copy, told them apart.
-                if (!c.is_lowercase(), c) < (!kept.is_lowercase(), *kept) {
-                    *kept = c;
-                }
-            })
-            .or_insert(c);
+        groups.entry(encoded).or_default().push(c);
     }
+    let chars: FxHashMap<&'static str, char> = groups
+        .into_iter()
+        .filter_map(|(encoded, letters)| match letters[..] {
+            [c] => Some((encoded, c)),
+            // Shared by case only: the capitals font that told them apart is lost on copy.
+            // Shared by two different letters: leave the code as it is rather than guess.
+            [a, b] if a.to_lowercase().eq(b.to_lowercase()) => {
+                Some((encoded, if a.is_lowercase() { a } else { b }))
+            }
+            _ => None,
+        })
+        .collect();
+    let starts = chars.keys().filter_map(|k| k.chars().next()).collect();
     let max_len = chars.keys().map(|k| k.len()).max().unwrap_or(0);
-    DecodeTable { chars, max_len }
+    DecodeTable { chars, starts, max_len }
 }
 
 /// Decodes text in a legacy [`Charset`] back into Unicode; the inverse of [`encode_charset`].
@@ -245,11 +252,16 @@ fn build_decode_table(def: &tables::CharsetDefinition) -> DecodeTable {
 ///
 /// Returns [`Cow::Borrowed`] when nothing in `input` needs decoding.
 ///
-/// Two limits come from the charsets themselves:
-/// - TCVN3 (ABC) uses the same code for most lowercase and uppercase toned vowels and relied on
-///   a separate font for capitals, so those codes decode to lowercase.
-/// - Charsets built from ASCII (VIQR, NCR, C string) also decode ASCII text that happens to
-///   match, e.g. VIQR `dd` becomes `đ`.
+/// Some limits come from the charsets themselves:
+/// - TCVN3 (ABC) and Vietware Full use the same code for most lowercase and uppercase toned
+///   vowels and relied on a separate font for capitals; VPS and VISCII lack some capitals.
+///   Such shared codes decode to lowercase. A code shared by two different letters (`Ặ` and
+///   `Ụ` in BKHCM 1) is left undecoded.
+/// - Charsets that use ASCII for letters also decode ASCII text that happens to match: VIQR
+///   (`dd` becomes `đ`, a full stop after a vowel becomes a dot below), NCR, C string, and
+///   BKHCM 1, which encodes `Đ Ấ Ý Ỳ Ỷ Ỹ` as `}`, `~`, `{`, `^`, `` ` `` and `|`.
+/// - [`Charset::UnicodeCompound`] is the letter with its hat or horn plus a combining tone
+///   mark, as [`encode_charset`] writes it, not full NFD.
 ///
 /// # Example
 /// ```rust
@@ -269,7 +281,9 @@ pub fn decode_charset<'a>(charset: Charset, input: &'a str) -> Cow<'a, str> {
     let mut i = 0;
     while i < input.len() {
         let rest = &input[i..];
+        let first = rest.chars().next().unwrap_or_default();
         let found = (1..=table.max_len.min(rest.len()))
+            .filter(|_| table.starts.contains(&first))
             .rev()
             .filter(|&len| rest.is_char_boundary(len))
             .find_map(|len| table.chars.get(&rest[..len]).map(|&c| (c, len)));
@@ -279,11 +293,10 @@ pub fn decode_charset<'a>(charset: Charset, input: &'a str) -> Cow<'a, str> {
                 i += len;
             }
             _ => {
-                let c = rest.chars().next().unwrap_or_default();
                 if let Some(out) = output.as_mut() {
-                    out.push(c);
+                    out.push(first);
                 }
-                i += c.len_utf8();
+                i += first.len_utf8();
             }
         }
     }

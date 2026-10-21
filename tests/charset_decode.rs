@@ -39,16 +39,14 @@ fn every_letter_decodes_back() {
         let shared = shared_codes(charset);
         for &c in def.keys() {
             let letter = c.to_string();
-            let back = decode_charset(charset, &encode_charset(charset, &letter)).into_owned();
+            let encoded = encode_charset(charset, &letter);
+            let back = decode_charset(charset, &encoded).into_owned();
             match shared.get(&c) {
                 None => assert_eq!(back, letter, "{charset}"),
-                Some(group) => {
-                    let back = back.chars().next().unwrap();
-                    assert!(group.contains(&back), "{charset}: {c} decoded to {back}");
-                    if group.iter().any(|g| g.is_lowercase()) {
-                        assert!(back.is_lowercase(), "{charset}: {c} decoded to {back}");
-                    }
+                Some(group) if group.iter().all(|g| g.to_lowercase().eq(c.to_lowercase())) => {
+                    assert_eq!(back, c.to_lowercase().to_string(), "{charset}");
                 }
+                Some(_) => assert_eq!(back, encoded, "{charset}: {c} must stay undecoded"),
             }
         }
     }
@@ -90,6 +88,24 @@ fn shared_uppercase_codes_decode_to_lowercase() {
         let encoded = encode_charset(charset, TEXT);
         assert_eq!(decode_charset(charset, &encoded), expected, "{charset}");
     }
+}
+
+#[test]
+fn documented_limits() {
+    // BKHCM 1 gives Ặ and Ụ one code; guessing would silently change the letter.
+    let encoded = encode_charset(Charset::Bkhcm1, "Ụ");
+    assert_eq!(decode_charset(Charset::Bkhcm1, &encoded), encoded);
+
+    // BKHCM 1 spells some capitals with ASCII punctuation.
+    assert_eq!(decode_charset(Charset::Bkhcm1, "{a}"), "ÝaĐ");
+
+    // VIQR reads a full stop after a vowel as a dot below.
+    assert_eq!(decode_charset(Charset::Viqr, "mu+a."), "mưạ");
+
+    // Full NFD is not the Unicode tổ hợp form.
+    let nfd = "e\u{302}\u{301}";
+    assert_eq!(decode_charset(Charset::UnicodeCompound, nfd), nfd);
+    assert_eq!(decode_charset(Charset::UnicodeCompound, "\u{ea}\u{301}"), "ế");
 }
 
 #[test]
