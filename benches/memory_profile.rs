@@ -301,13 +301,13 @@ fn test_reset_leak() {
 }
 
 // ===========================================================================
-// Test 7: Uppercase DFA bypass analysis
+// Test 7: Uppercase DFA reuse analysis
 // ===========================================================================
 
-fn test_uppercase_dfa_bypass() {
-    println!("=== 7. Uppercase DFA bypass analysis ===");
-    println!("  DFA fast path condition: is_ascii && !is_upper_case");
-    println!("  → ALL uppercase keys hit the slow path (rule engine)");
+fn test_uppercase_dfa_reuse() {
+    println!("=== 7. Uppercase DFA reuse analysis ===");
+    println!("  Uppercase keys reuse lowercase DFA transitions.");
+    println!("  The remaining cost reapplies the active uppercase bit mask.");
     println!();
 
     let mut e = Engine::new(InputMethod::telex());
@@ -331,9 +331,9 @@ fn test_uppercase_dfa_bypass() {
     }
     let upper_ns = start.elapsed().as_nanos() as f64 / 100_000.0;
 
-    println!("  lowercase 'tieengs':   {:>8.1} ns (DFA hit)", lower_ns);
-    println!("  uppercase 'TIEENGS':   {:>8.1} ns (DFA miss, slow path)", upper_ns);
-    println!("  ratio:                 {:>8.1}x slower", upper_ns / lower_ns);
+    println!("  lowercase 'tieengs':   {:>8.1} ns", lower_ns);
+    println!("  uppercase 'TIEENGS':   {:>8.1} ns", upper_ns);
+    println!("  ratio:                 {:>8.2}x", upper_ns / lower_ns);
     println!();
 
     e.reset();
@@ -354,9 +354,9 @@ fn test_uppercase_dfa_bypass() {
     }
     let a_up_ns = start.elapsed().as_nanos() as f64 / 100_000.0;
 
-    println!("  single 'a':            {:>8.1} ns (DFA hit)", a_ns);
-    println!("  single 'A':            {:>8.1} ns (DFA miss)", a_up_ns);
-    println!("  ratio:                 {:>8.1}x slower", a_up_ns / a_ns);
+    println!("  single 'a':            {:>8.1} ns", a_ns);
+    println!("  single 'A':            {:>8.1} ns", a_up_ns);
+    println!("  ratio:                 {:>8.2}x", a_up_ns / a_ns);
     println!();
 }
 
@@ -691,7 +691,7 @@ fn main() {
     test_ram_growth();
     test_dfa_growth();
     test_reset_leak();
-    test_uppercase_dfa_bypass();
+    test_uppercase_dfa_reuse();
     test_realistic_session();
     test_extreme_vietnamese();
     test_extreme_english();

@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Performance
+
+- Lowercase DFA hits now copy their cached UTF-8 output directly instead of decoding it and
+  walking the transformation buffer to reproduce identical text.
+- ASCII DFA transition rank uses two native `u64` words instead of variable `u128` shifts.
+- The two-word transition rank selects its lower-word contribution with a 0/1 mask, removing
+  a data-dependent lane-selection branch. Against a same-session branchy build, five warmed
+  typing streams showed 1.8% and 3.2% improvements on two traces, no significant change on
+  two, and a 1.9% regression on one; the aggregate effect is small and mixed.
+- Engine-owned DFA output skips repeated UTF-8 validation; the public advanced DFA reader
+  remains checked because callers can mutate its public arenas.
+- Steady-state allocation tests now require exactly zero allocations for warmed DFA input,
+  English passthrough, edit deltas, output polling, and undo.
+- Criterion workloads now reset to an identical state per iteration and exclude engine
+  construction from the cold rule/JIT measurement. On the Ryzen 7 H 255 validation host,
+  corrected benchmarks measured 18–27% faster DFA streams, 12% faster edit deltas,
+  23–24% faster undo, and about 9% faster mixed sentences; cold JIT, English passthrough,
+  uppercase input, and output polling showed no statistically significant regression.
+
 ## [0.5.0] - 2026-10-21
 
 ### Migration

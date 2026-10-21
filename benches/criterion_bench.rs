@@ -4,7 +4,7 @@
 //! Reports are written to `target/criterion/`.
 
 use bamboo_core::{Engine, InputMethodPreset, Mode};
-use criterion::{BenchmarkId, Criterion, criterion_group};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group};
 use std::hint::black_box;
 
 fn fresh_engine() -> Engine {
@@ -14,6 +14,7 @@ fn fresh_engine() -> Engine {
 fn warm_engine(keys: &str) -> Engine {
     let mut e = fresh_engine();
     e.process_str(keys, Mode::Vietnamese);
+    e.reset();
     e
 }
 
@@ -21,8 +22,9 @@ fn bench_dfa_hit(c: &mut Criterion) {
     let mut group = c.benchmark_group("dfa_hit");
     for word in ["tieengs", "vietj", "nguwowif", "dduwowngf", "khuyeens"] {
         group.bench_with_input(BenchmarkId::new("keystroke_stream", word), word, |b, w| {
-            let mut e = warm_engine("");
+            let mut e = warm_engine(w);
             b.iter(|| {
+                e.reset();
                 for ch in w.chars() {
                     e.process_key(black_box(ch), Mode::Vietnamese);
                 }
@@ -35,26 +37,27 @@ fn bench_dfa_hit(c: &mut Criterion) {
 
 fn bench_dfa_miss_slow(c: &mut Criterion) {
     let mut group = c.benchmark_group("dfa_miss_slow");
-    // Fresh engine each iteration = DFA miss / rule slow path.
+    // Engine construction happens in setup, outside the timed region. Each
+    // timed sample starts with an empty DFA and measures rule + JIT work only.
     group.bench_function("cold_tone_word", |b| {
-        b.iter_custom(|iters| {
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let mut e = fresh_engine();
+        b.iter_batched_ref(
+            fresh_engine,
+            |e| {
                 for ch in "nghieengs".chars() {
                     e.process_key(black_box(ch), Mode::Vietnamese);
                 }
                 black_box(e.output_str());
-            }
-            start.elapsed()
-        });
+            },
+            BatchSize::SmallInput,
+        );
     });
     group.finish();
 }
 
 fn bench_output(c: &mut Criterion) {
     let mut group = c.benchmark_group("output");
-    let e = warm_engine("tieengs");
+    let mut e = warm_engine("tieengs");
+    e.process_str("tieengs", Mode::Vietnamese);
     group.bench_function("output_str", |b| {
         b.iter(|| black_box(e.output_str()));
     });
@@ -66,9 +69,10 @@ fn bench_output(c: &mut Criterion) {
 
 fn bench_delta(c: &mut Criterion) {
     let mut group = c.benchmark_group("delta");
-    group.bench_function("process_key_delta_per_key", |b| {
-        let mut e = fresh_engine();
+    group.bench_function("process_key_edit_per_key", |b| {
+        let mut e = warm_engine("vietj");
         b.iter(|| {
+            e.reset();
             for ch in "vietj".chars() {
                 let d = e.process_key_edit(black_box(ch), Mode::Vietnamese);
                 black_box(d);
@@ -80,17 +84,19 @@ fn bench_delta(c: &mut Criterion) {
 
 fn bench_backspace(c: &mut Criterion) {
     let mut group = c.benchmark_group("backspace");
-    group.bench_function("remove_last_char_x1", |b| {
+    group.bench_function("undo_last_key_x1", |b| {
         let mut e = warm_engine("tieengs");
         b.iter(|| {
+            e.reset();
             e.process_str("tieengs", Mode::Vietnamese);
             e.undo_last_key();
             black_box(e.output_str());
         });
     });
-    group.bench_function("remove_last_char_x3", |b| {
+    group.bench_function("undo_last_key_x3", |b| {
         let mut e = warm_engine("tieengs");
         b.iter(|| {
+            e.reset();
             e.process_str("tieengs", Mode::Vietnamese);
             for _ in 0..3 {
                 e.undo_last_key();
@@ -106,6 +112,7 @@ fn bench_english(c: &mut Criterion) {
     group.bench_function("passthrough", |b| {
         let mut e = fresh_engine();
         b.iter(|| {
+            e.reset();
             for ch in "getUserNameByIdentifier".chars() {
                 e.process_key(black_box(ch), Mode::English);
             }
@@ -115,11 +122,29 @@ fn bench_english(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_uppercase(c: &mut Criterion) {
+    let mut group = c.benchmark_group("uppercase");
+    for word in ["tieengs", "TIEENGS", "Tieengs"] {
+        group.bench_with_input(BenchmarkId::new("keystroke_stream", word), word, |b, w| {
+            let mut e = warm_engine(&w.to_ascii_lowercase());
+            b.iter(|| {
+                e.reset();
+                for ch in w.chars() {
+                    e.process_key(black_box(ch), Mode::Vietnamese);
+                }
+                black_box(e.output_str());
+            });
+        });
+    }
+    group.finish();
+}
+
 fn bench_sentence(c: &mut Criterion) {
     let mut group = c.benchmark_group("sentence");
     group.bench_function("27_chars", |b| {
         let mut e = fresh_engine();
         b.iter(|| {
+            e.reset();
             for ch in "tooi ddax tieengs Vieejt Nam".chars() {
                 e.process_key(black_box(ch), Mode::Vietnamese);
             }
@@ -129,6 +154,7 @@ fn bench_sentence(c: &mut Criterion) {
     group.bench_function("62_chars", |b| {
         let mut e = fresh_engine();
         b.iter(|| {
+            e.reset();
             for ch in "Chufng ta ddaang soongs treen quoocs gia Vieejt Nam xinh depf vaaf tuwj doj"
                 .chars()
             {
@@ -143,8 +169,9 @@ fn bench_sentence(c: &mut Criterion) {
 fn bench_commit(c: &mut Criterion) {
     let mut group = c.benchmark_group("commit");
     group.bench_function("commit_word", |b| {
-        let mut e = fresh_engine();
+        let mut e = warm_engine("tieengs");
         b.iter(|| {
+            e.reset();
             e.process_str("tieengs", Mode::Vietnamese);
             e.commit();
             black_box(e.output_str());
@@ -161,6 +188,7 @@ criterion_group!(
     bench_delta,
     bench_backspace,
     bench_english,
+    bench_uppercase,
     bench_sentence,
     bench_commit
 );

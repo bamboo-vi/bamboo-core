@@ -179,8 +179,16 @@ impl Engine {
         // P1 fast path: reuse cached lowercase flatten from DFA state and
         // re-apply case bits — avoids full effect-chain + PHF resolution.
         if self.current_state_id != 0 {
-            let flat = self.dfa.get_flat(self.current_state_id);
+            let flat = self.dfa.get_flat_cached(self.current_state_id);
             if !flat.is_empty() {
+                // DFA output is stored lowercase-canonical. The overwhelmingly
+                // common path has no uppercase entries, so copy its UTF-8 in
+                // one operation instead of decoding chars and walking the
+                // transformation buffer merely to reproduce the same string.
+                if self.active_upper_mask == 0 {
+                    self.cached_output.push_str(flat);
+                    return;
+                }
                 let mut flat_chars = flat.chars();
                 for t in &self.active_buffer[..self.active_len] {
                     if t.effect_type == EffectType::Appending
@@ -1125,13 +1133,13 @@ impl Engine {
             Cow::Borrowed(&self.cached_output)
         } else if options == OutputOptions::LOWER_CASE
             && self.current_state_id != 0
-            && !self.dfa.get_flat(self.current_state_id).is_empty()
+            && !self.dfa.get_flat_cached(self.current_state_id).is_empty()
         {
             // The DFA caches the lowercase flatten of the canonical
             // composition, which is exactly `LOWER_CASE` output (case bits do
             // not matter once lowered). Polling readers such as per-keystroke
             // validity checks borrow it with zero allocation or flattening.
-            Cow::Borrowed(self.dfa.get_flat(self.current_state_id))
+            Cow::Borrowed(self.dfa.get_flat_cached(self.current_state_id))
         } else {
             Cow::Owned(crate::flattener::flatten_slice(active, options))
         }

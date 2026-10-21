@@ -143,15 +143,12 @@ fn zero_alloc_process_key_dfa_hit() {
 
     let (n, _) = measure_allocs(|| {
         for _ in 0..50 {
+            e.reset();
             e.process_str("vieejt", Mode::Vietnamese);
             black_box(e.output_str());
-            e.commit();
         }
     });
-    // commit() grows committed_text (String push). Allow bounded allocs from
-    // commit growth only; the keystroke stream itself must not allocate.
-    // 50 commits * 1 push_str growth = at most ~50 reallocs after capacity is reached.
-    assert!(n <= 50, "process_key (DFA hit) + commit should be near-zero alloc, got {n} allocs");
+    assert_eq!(n, 0, "warmed process_key DFA hits must be zero-alloc, got {n}");
 }
 
 #[test]
@@ -164,36 +161,31 @@ fn zero_alloc_process_key_stream_no_commit() {
 
     let (n, _) = measure_allocs(|| {
         for _ in 0..50 {
+            e.reset();
             for ch in "tieengs".chars() {
                 e.process_key(ch, Mode::Vietnamese);
             }
             black_box(e.output_str());
-            e.commit();
         }
     });
-    // Steady-state: cached_output is pre-reserved, DFA is warm.
-    // TODO(PR-4): tighten to 0 after eliminating residual slow-path allocs.
-    // Current known allocs: committed_text growth on commit().
-    assert!(n <= 120, "warm DFA keystroke stream should be near-zero alloc, got {n} allocs");
+    assert_eq!(n, 0, "warm DFA keystroke stream must be zero-alloc, got {n}");
 }
 
 #[test]
 #[serial]
-fn zero_alloc_remove_last_char() {
+fn zero_alloc_undo_last_key() {
     let mut e = warm_telex();
     e.process_str("tieengs", Mode::Vietnamese);
 
     let (n, _) = measure_allocs(|| {
         for _ in 0..20 {
+            e.reset();
             e.process_str("tieengs", Mode::Vietnamese);
             e.undo_last_key();
             black_box(e.output_str());
-            e.commit();
         }
     });
-    // TODO(PR-4): tighten after eliminating residual slow-path allocs.
-    // Current known allocs: committed_text growth on commit().
-    assert!(n <= 60, "remove_last_char should be near-zero alloc, got {n} allocs");
+    assert_eq!(n, 0, "undo_last_key on a warmed word must be zero-alloc, got {n}");
 }
 
 #[test]
@@ -202,17 +194,14 @@ fn zero_alloc_english_passthrough() {
     let mut e = warm_telex();
     let (n, _) = measure_allocs(|| {
         for _ in 0..50 {
+            e.reset();
             for ch in "getUserName".chars() {
                 e.process_key(ch, Mode::English);
             }
             black_box(e.output_str());
-            e.commit();
         }
     });
-    assert!(
-        n <= 50,
-        "English passthrough should be near-zero alloc (commit growth only), got {n} allocs"
-    );
+    assert_eq!(n, 0, "English passthrough must be zero-alloc, got {n}");
 }
 
 #[test]
@@ -249,20 +238,19 @@ fn bounded_alloc_jit_new_state() {
 
 #[test]
 #[serial]
-fn zero_alloc_process_key_delta() {
+fn zero_alloc_process_key_edit() {
     let mut e = warm_telex();
     e.process_str("vietj", Mode::Vietnamese);
     e.commit();
 
     let (n, _) = measure_allocs(|| {
         for _ in 0..50 {
+            e.reset();
             for ch in "vietj".chars() {
                 let d = e.process_key_edit(ch, Mode::Vietnamese);
                 black_box(d);
             }
-            e.commit();
         }
     });
-    // delta API returns Cow; internal delta_buf is pre-reserved.
-    assert!(n <= 50, "process_key_delta should be near-zero alloc, got {n} allocs");
+    assert_eq!(n, 0, "process_key_edit on a warmed word must be zero-alloc, got {n}");
 }

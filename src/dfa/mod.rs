@@ -81,8 +81,8 @@ impl State {
     /// Performs a fast transition lookup on an ASCII key using bitset rank.
     ///
     /// `trans_states` is sorted by key and the bitset records exactly which
-    /// keys exist, so lookup = one bit test + one popcount rank — constant
-    /// time with no data-dependent branches and no key scan:
+    /// keys exist, so lookup = one bit test plus the popcount rank of lower
+    /// bits — constant time with no key scan:
     /// 1. `hit` = bit `key` of the 128-bit bitset (0/1 multiplier).
     /// 2. `rank` = popcount of bits below `key` = index of this key's slot.
     ///
@@ -95,9 +95,16 @@ impl State {
     pub const fn get_transition(&self, key: u8) -> u32 {
         debug_assert!(key < 128);
         let idx = key as usize;
-        let bits = (self.bitset[0] as u128) | ((self.bitset[1] as u128) << 64);
-        let hit = ((bits >> idx) & 1) as u32;
-        let rank = (bits & ((1u128 << idx) - 1)).count_ones() as usize;
+        let word = idx >> 6;
+        let bit = idx & 63;
+        let current = self.bitset[word];
+        let hit = ((current >> bit) & 1) as u32;
+        let lower_in_word = current & ((1u64 << bit) - 1);
+        // `word` is 0 or 1. Turn it into an all-zero/all-one mask so lane
+        // selection does not need a data-dependent branch.
+        let prior_word_mask = 0usize.wrapping_sub(word);
+        let rank = lower_in_word.count_ones() as usize
+            + (self.bitset[0].count_ones() as usize & prior_word_mask);
         // On a hit, `rank` is the key's slot (`< trans_len <= 16`). On a miss
         // it can reach 16 (all keys below), so mask before indexing; the zero
         // `hit` multiplier discards the loaded value either way.
@@ -238,6 +245,25 @@ impl Dfa {
         let start = state.flat_offset as usize;
         let end = start + state.flat_len as usize;
         std::str::from_utf8(&self.flat_arena[start..end]).unwrap_or("")
+    }
+
+    /// Returns cached output for an engine-owned DFA without revalidating UTF-8.
+    ///
+    /// This stays crate-private because the public `Dfa` fields can be mutated
+    /// by advanced callers. An `Engine` owns its DFA privately, and every byte
+    /// in its flat arena is appended by `char::encode_utf8` through
+    /// `append_flatten_bytes`, so the selected slice is always valid UTF-8.
+    #[inline]
+    pub(crate) fn get_flat_cached(&self, state_id: u32) -> &str {
+        let state = &self.states[state_id as usize];
+        let start = state.flat_offset as usize;
+        let end = start + state.flat_len as usize;
+        let bytes = &self.flat_arena[start..end];
+        debug_assert!(std::str::from_utf8(bytes).is_ok());
+        // SAFETY: Engine-owned flat_arena bytes are produced exclusively by
+        // encoding Rust `char` values as UTF-8; offsets and lengths are stored
+        // at the same append operation in Dfa::add_state.
+        unsafe { std::str::from_utf8_unchecked(bytes) }
     }
 
     /// Returns true when the DFA has hit [`DFA_MAX_STATES`] and is frozen.
@@ -555,6 +581,22 @@ mod tests {
         assert_ne!(id_a, id_b);
         assert_eq!(dfa.find_state(&comp_a), Some(id_a));
         assert_eq!(dfa.find_state(&comp_b), Some(id_b));
+    }
+
+    #[test]
+    fn engine_flat_cache_is_valid_utf8_while_public_reader_handles_corruption() {
+        let mut dfa = Dfa::new();
+        let comp = [appending('ư'), appending('ơ')];
+        let id = dfa.add_state(&comp);
+        assert_eq!(dfa.get_flat_cached(id), dfa.get_flat(id));
+        assert_eq!(dfa.get_flat_cached(id), "ươ");
+
+        // Advanced users can mutate public DFA storage, so the public reader
+        // must remain checked even though Engine's private DFA uses the faster
+        // invariant-based accessor.
+        let offset = dfa.states[id as usize].flat_offset as usize;
+        dfa.flat_arena[offset] = 0xFF;
+        assert_eq!(dfa.get_flat(id), "");
     }
 
     /// Regression: on hash collision, older compositions must remain reachable
