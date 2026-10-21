@@ -16,9 +16,12 @@
 //! - **Unicode C string Hex** / **Unicode C string Decimal**
 
 pub mod tables;
+use rustc_hash::FxHashSet;
 use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::LazyLock;
+use tables::CharsetDefinition;
 pub use tables::{get_charset_definition, get_charset_definitions};
 
 static UNICODE: &str = "Unicode";
@@ -126,6 +129,10 @@ impl FromStr for Charset {
 /// Returns [`Cow::Borrowed`] with **zero heap allocations** if `charset` is [`Charset::Unicode`],
 /// if `input` is empty, or if `input` contains no Vietnamese characters requiring encoding.
 ///
+/// VIQR puts a backslash before a diacritic character that would otherwise join the letter
+/// in front of it, and before every backslash, so the text reads back the same:
+/// `"mưa."` becomes `"mu+a\."`.
+///
 /// # Example
 /// ```rust
 /// use bamboo_core::{encode_charset, Charset};
@@ -143,6 +150,7 @@ pub fn encode_charset<'a>(charset: Charset, input: &'a str) -> Cow<'a, str> {
     }
 
     match get_charset_definition(charset.as_str()) {
+        Some(charset_def) if charset == Charset::Viqr => encode_viqr(charset_def, input),
         Some(charset_def) => {
             if !input.chars().any(|c| !c.is_ascii() && charset_def.contains_key(&c)) {
                 return Cow::Borrowed(input);
@@ -163,6 +171,41 @@ pub fn encode_charset<'a>(charset: Charset, input: &'a str) -> Cow<'a, str> {
         }
         None => Cow::Borrowed(input),
     }
+}
+
+/// Every letter code in the VIQR table, to tell when a following character would join it.
+static VIQR_CODES: LazyLock<FxHashSet<&'static str>> = LazyLock::new(|| {
+    get_charset_definition(Charset::Viqr.as_str())
+        .map(|def| def.values().copied().collect())
+        .unwrap_or_default()
+});
+
+fn encode_viqr<'a>(charset_def: &CharsetDefinition, input: &'a str) -> Cow<'a, str> {
+    let mut output = String::with_capacity(input.len());
+    let mut changed = false;
+    let mut last_code = 0;
+    for char in input.chars() {
+        let start = output.len();
+        let escape = char == '\\'
+            || (char.is_ascii_punctuation() && {
+                let mut joined = String::from(&output[last_code..]);
+                joined.push(char);
+                VIQR_CODES.contains(joined.as_str())
+            });
+        if escape {
+            output.push('\\');
+            changed = true;
+        }
+        match charset_def.get(&char).filter(|_| !char.is_ascii()) {
+            Some(encoded) => {
+                output.push_str(encoded);
+                changed = true;
+            }
+            None => output.push(char),
+        }
+        last_code = start;
+    }
+    if changed { Cow::Owned(output) } else { Cow::Borrowed(input) }
 }
 
 /// Encodes a Vietnamese Unicode string into a specific character set by string name.
@@ -189,6 +232,9 @@ pub fn encode(charset_name: &str, input: &str) -> String {
     }
 
     match get_charset_definition(charset_name) {
+        Some(charset_def) if charset_name == Charset::Viqr.as_str() => {
+            encode_viqr(charset_def, input).into_owned()
+        }
         Some(charset_def) => {
             let mut output = String::with_capacity(input.len());
             for char in input.chars() {
@@ -252,5 +298,31 @@ mod tests {
         let res_viqr = encode_charset(Charset::Viqr, "ti\u{1ebf}ng Vi\u{1ec7}t");
         assert_eq!(res_viqr, "tie^'ng Vie^.t");
         assert!(matches!(res_viqr, Cow::Owned(_)));
+    }
+
+    #[test]
+    fn test_viqr_escapes_marks_that_would_join_a_letter() {
+        let cases = [
+            ("m\u{1b0}a.", "mu+a\\."),
+            ("H\u{e0} N\u{1ed9}i?", "Ha` No^.i\\?"),
+            ("xa.", "xa\\."),
+            ("Y?", "Y\\?"),
+            ("\u{1a1}'", "o+\\'"),
+            ("e^", "e\\^"),
+            ("a(", "a\\("),
+            ("o+", "o\\+"),
+            ("a\\b", "a\\\\b"),
+            // Nothing to join: a toned letter takes no second tone.
+            ("\u{1ea5}.", "a^'."),
+            ("\u{ea}^", "e^^"),
+            ("x.", "x."),
+            ("a .", "a ."),
+            ("a)", "a)"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(encode_charset(Charset::Viqr, input), expected, "{input:?}");
+            assert_eq!(encode("VIQR", input), expected, "{input:?}");
+        }
+        assert!(matches!(encode_charset(Charset::Viqr, "x. a)"), Cow::Borrowed(_)));
     }
 }
