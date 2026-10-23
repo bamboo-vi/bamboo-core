@@ -3,7 +3,7 @@
 //! Run with `cargo bench --bench criterion_bench`.
 //! Reports are written to `target/criterion/`.
 
-use bamboo_core::{Engine, InputMethodPreset, Mode};
+use bamboo_core::{Charset, Engine, InputMethodPreset, Mode, decode_charset, encode_charset};
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group};
 use std::hint::black_box;
 
@@ -180,6 +180,27 @@ fn bench_commit(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_charset(c: &mut Criterion) {
+    const UNICODE: &str = "Đức Hưởng ăn quýt, Ỷ Lại uống trà ở Phố Hiến; trời thì ẩm ướt, ngoài sân cỏ úa dưới mưa phùn.";
+    let viqr = encode_charset(Charset::Viqr, UNICODE).into_owned();
+    let vni = encode_charset(Charset::VniWindows, UNICODE).into_owned();
+    let mut group = c.benchmark_group("charset");
+
+    group.bench_function("encode_viqr", |b| {
+        b.iter(|| encode_charset(Charset::Viqr, black_box(UNICODE)));
+    });
+    group.bench_function("decode_viqr", |b| {
+        b.iter(|| decode_charset(Charset::Viqr, black_box(&viqr)));
+    });
+    group.bench_function("decode_vni", |b| {
+        b.iter(|| decode_charset(Charset::VniWindows, black_box(&vni)));
+    });
+    group.bench_function("decode_ascii_passthrough", |b| {
+        b.iter(|| decode_charset(Charset::VniWindows, black_box("hello, world!")));
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_dfa_hit,
@@ -190,7 +211,8 @@ criterion_group!(
     bench_english,
     bench_uppercase,
     bench_sentence,
-    bench_commit
+    bench_commit,
+    bench_charset
 );
 
 fn main() {

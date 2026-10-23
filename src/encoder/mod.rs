@@ -312,11 +312,14 @@ pub fn decode_charset<'a>(charset: Charset, input: &'a str) -> Cow<'a, str> {
             i += 1 + next.len_utf8();
             continue;
         }
-        let found = (1..=table.max_len.min(rest.len()))
-            .filter(|_| table.starts.contains(&first))
-            .rev()
-            .filter(|&len| rest.is_char_boundary(len))
-            .find_map(|len| table.chars.get(&rest[..len]).map(|&c| (c, len)));
+        let found = if table.starts.contains(&first) {
+            (1..=table.max_len.min(rest.len()))
+                .rev()
+                .filter(|&len| rest.is_char_boundary(len))
+                .find_map(|len| table.chars.get(&rest[..len]).map(|&c| (c, len)))
+        } else {
+            None
+        };
         match found {
             Some((c, len)) if output.is_some() || rest[..len].chars().ne(std::iter::once(c)) => {
                 output.get_or_insert_with(|| input[..i].to_string()).push(c);
