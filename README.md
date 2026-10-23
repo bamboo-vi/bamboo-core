@@ -16,21 +16,44 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 - **O(1) backspace** via compact 8-byte snapshot stack
 - **O(N) single-pass** spelling validation
 - **FFI** for C/C++ integration and **WASM** bindings
+- **Legacy charset conversion** to and from Unicode for 16 Vietnamese encodings
 
 ## Installation
 
 ```toml
 [dependencies]
-bamboo-core = "0.5.0"
+bamboo-core = "0.5.1"
 ```
 
-### Migrating to 0.5.0
+### Legacy Charset Conversion (0.5.1)
+
+`encode_charset` converts Unicode to a legacy Vietnamese encoding, while
+`decode_charset` converts supported legacy text back to Unicode. Decoding uses the longest
+matching sequence and leaves ambiguous codes unchanged rather than guessing.
+
+```rust
+use bamboo_core::{Charset, decode_charset, encode_charset};
+
+let viqr = encode_charset(Charset::Viqr, "mưa.");
+assert_eq!(viqr, "mu+a\\.");
+assert_eq!(decode_charset(Charset::Viqr, &viqr), "mưa.");
+
+assert_eq!(
+    decode_charset(Charset::VniWindows, "tieáng Vieät"),
+    "tiếng Việt"
+);
+```
+
+VIQR punctuation that would otherwise extend the preceding letter is escaped with `\\`, so
+encoding and decoding preserve ordinary prose such as sentence-ending full stops and questions.
+
+### Migration Notes from 0.5.0
 
 Version 0.5.0 introduces named APIs for operations whose boolean arguments were easy to
 misread. The old APIs remain source-compatible, emit deprecation warnings, and are planned
 for removal in 1.0.0.
 
-| Deprecated API | 0.5.0 replacement |
+| Deprecated API | Replacement |
 |---|---|
 | `remove_last_char(true)` | `undo_last_key()` or `undo_last_key_with(ToneRefresh::Recompute)` |
 | `remove_last_char(false)` | `undo_last_key_with(ToneRefresh::PreserveSnapshot)` |
@@ -207,7 +230,7 @@ The codebase follows a modular domain-driven architecture designed for zero allo
 - **`input_method` (`src/input_method/`)**: Input method definitions (Telex, VNI, VIQR, Microsoft layout) with zero-copy rule sharing across instances via `Arc<EngineRules>` and `Arc<InputMethod>`.
 - **`orthography` (`src/orthography/`)**: Vietnamese orthography domain covering character phonetics, dense diacritic and tone tables, $O(1)$ bitmask syllable validation (`spelling`), and CVC syllable boundary extraction.
 - **`dfa` (`src/dfa/`)**: JIT cache with flat arena storage (lazy arenas, 8192-state freeze cap), 128-bit bitset fast rejection, branchless popcount-rank transition lookup, 64 B single-cache-line states, and canvas flattener.
-- **`encoder` (`src/encoder/`)**: Zero-allocation legacy encoding conversion supporting 16 Vietnamese character sets (TCVN3, VNI-Windows, VIQR, VISCII, VPS, etc.).
+- **`encoder` (`src/encoder/`)**: Legacy encoding and decoding for 16 Vietnamese character sets (TCVN3, VNI-Windows, VIQR, VISCII, VPS, etc.); the typed `Cow` APIs borrow unchanged text.
 - **`ffi` (`src/ffi.rs`) & `wasm` (`src/wasm.rs`)**: Safe C-ABI bindings with `#![deny(unsafe_op_in_unsafe_fn)]` and WebAssembly wrappers.
 
 ## License

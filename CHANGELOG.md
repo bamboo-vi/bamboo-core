@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-23
+
+### Added
+
+- Added `decode_charset`, the typed inverse of `encode_charset`, and re-exported it from the
+  crate root and `advanced` module. It decodes all supported legacy charset tables using
+  longest-match parsing, preserves text with no encodings as borrowed `Cow`, and leaves
+  irreducibly ambiguous codes unchanged.
+- Added legacy-character-set coverage and Criterion workloads for VIQR and VNI decoding,
+  including known external VISCII control-code capitals and VIQR backslash escapes.
+
+### Fixed
+
+- Corrected Windows-1258 output for `Ứ` and `Đ`.
+- VIQR encoding now escapes a backslash and punctuation that would otherwise join the previous
+  encoded letter. `encode_charset(Charset::Viqr, "mưa.")` now produces `mu+a\\.` and decodes
+  back to the original text.
+
 ### Performance
 
 - Lowercase DFA hits now copy their cached UTF-8 output directly instead of decoding it and
@@ -22,6 +40,12 @@ All notable changes to this project will be documented in this file.
   corrected benchmarks measured 18–27% faster DFA streams, 12% faster edit deltas,
   23–24% faster undo, and about 9% faster mixed sentences; cold JIT, English passthrough,
   uppercase input, and output polling showed no statistically significant regression.
+- Decode checks whether the first character can begin an encoded sequence once per input
+  position instead of repeating the lookup for every candidate length. On the release
+  validation host, ASCII passthrough improved from 226 ns to 105 ns, VIQR decoding from
+  1.50 µs to 0.92 µs, and VNI decoding from 1.75 µs to 0.87 µs.
+- VIQR encoding skips charset-table lookups for ASCII input. The escaped-VIQR workload improved
+  from 1.58 µs to 0.80 µs while preserving the same output.
 
 ## [0.5.0] - 2026-10-21
 
