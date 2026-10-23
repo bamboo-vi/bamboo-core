@@ -122,6 +122,22 @@ fn zero_alloc_output_str() {
 
 #[test]
 #[serial]
+fn zero_alloc_viqr_without_codes() {
+    let input = "x. a) hello, world";
+    // The first call builds the VIQR code set.
+    black_box(bamboo_core::encode_charset(bamboo_core::Charset::Viqr, input));
+    let (n, _) = measure_allocs(|| {
+        for _ in 0..100 {
+            let cow = bamboo_core::encode_charset(bamboo_core::Charset::Viqr, black_box(input));
+            assert!(matches!(cow, Cow::Borrowed(_)));
+            black_box(cow);
+        }
+    });
+    assert_eq!(n, 0, "VIQR encoding with nothing to change must be zero-alloc, got {n} allocs");
+}
+
+#[test]
+#[serial]
 fn zero_alloc_output_cow_borrowed() {
     let e = warm_telex();
     let (n, _) = measure_allocs(|| {
