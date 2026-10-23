@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Documentation
+
+- Added a crate-level rustdoc migration guide for 0.4.x callers. It lists every deprecated API,
+  its 0.5 replacement, and the 1.0.0 removal horizon. The API selection guide now recommends the
+  typed `encode_charset` and `decode_charset` APIs over `advanced::encode` for new code.
+
 ## [0.5.1] - 2026-10-23
 
 ### Added
