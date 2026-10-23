@@ -184,7 +184,7 @@ pub mod parallel {
 
 pub use config::{BracketMode, Config, ConfigBuilder, ToneStyle, W2uMode};
 pub(crate) use encoder::tables as charset_def;
-pub use encoder::{Charset, encode_charset};
+pub use encoder::{Charset, decode_charset, encode_charset};
 #[allow(deprecated)]
 pub use engine::{
     EditDelta, Engine, EngineRules, LastWordForm, RestoreMark, ToneRefresh, Transformation,
@@ -208,7 +208,8 @@ pub mod advanced {
     };
     pub use crate::dfa::{DFA_MAX_STATES, Dfa, State};
     pub use crate::encoder::{
-        Charset, charset_names, encode, encode_charset, get_charset_name, get_charset_names,
+        Charset, charset_names, decode_charset, encode, encode_charset, get_charset_name,
+        get_charset_names,
     };
     pub use crate::input_method_def::{
         InputMethodDef, get_input_method, get_input_method_definitions,

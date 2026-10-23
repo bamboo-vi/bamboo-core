@@ -19,6 +19,9 @@ pub mod tables;
 use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::LazyLock;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 pub use tables::{get_charset_definition, get_charset_definitions};
 
 static UNICODE: &str = "Unicode";
@@ -205,6 +208,129 @@ pub fn encode(charset_name: &str, input: &str) -> String {
         }
         None => input.to_string(),
     }
+}
+
+struct DecodeTable {
+    chars: FxHashMap<&'static str, char>,
+    starts: FxHashSet<char>,
+    max_len: usize,
+}
+
+// Capitals VISCII puts on control codes and 0xA0. The encode table folds them into lowercase so
+// typing never sends control characters, but real VISCII files contain them.
+const VISCII_CAPITALS: [(&str, char); 7] = [
+    ("\u{2}", 'Ẳ'),
+    ("\u{5}", 'Ẵ'),
+    ("\u{6}", 'Ẫ'),
+    ("\u{14}", 'Ỷ'),
+    ("\u{19}", 'Ỹ'),
+    ("\u{1e}", 'Ỵ'),
+    ("\u{a0}", 'Õ'),
+];
+
+static DECODE_TABLES: LazyLock<FxHashMap<&'static str, DecodeTable>> = LazyLock::new(|| {
+    get_charset_definitions()
+        .entries()
+        .map(|(&name, def)| {
+            let extra: &[(&str, char)] =
+                if name == Charset::Viscii.as_str() { &VISCII_CAPITALS } else { &[] };
+            (name, build_decode_table(def, extra))
+        })
+        .collect()
+});
+
+fn build_decode_table(
+    def: &tables::CharsetDefinition,
+    extra: &[(&'static str, char)],
+) -> DecodeTable {
+    let mut groups: FxHashMap<&'static str, Vec<char>> = FxHashMap::default();
+    for (&c, &encoded) in def.entries() {
+        groups.entry(encoded).or_default().push(c);
+    }
+    let mut chars: FxHashMap<&'static str, char> = groups
+        .into_iter()
+        .filter_map(|(encoded, letters)| match letters[..] {
+            [c] => Some((encoded, c)),
+            // Shared by case only: the capitals font that told them apart is lost on copy.
+            // Shared by two different letters: leave the code as it is rather than guess.
+            [a, b] if a.to_lowercase().eq(b.to_lowercase()) => {
+                Some((encoded, if a.is_lowercase() { a } else { b }))
+            }
+            _ => None,
+        })
+        .collect();
+    chars.extend(extra.iter().copied());
+    let starts = chars.keys().filter_map(|k| k.chars().next()).collect();
+    let max_len = chars.keys().map(|k| k.len()).max().unwrap_or(0);
+    DecodeTable { chars, starts, max_len }
+}
+
+/// Decodes text in a legacy [`Charset`] back into Unicode; the inverse of [`encode_charset`].
+///
+/// Sequences are matched longest first, so multi-character encodings such as VNI `eá` or
+/// VIQR `e^'` decode to one letter. Anything that is not an encoded sequence passes through.
+///
+/// Returns [`Cow::Borrowed`] when nothing in `input` needs decoding.
+///
+/// Some limits come from the charsets themselves:
+/// - TCVN3 (ABC) and Vietware Full use the same code for most lowercase and uppercase toned
+///   vowels and relied on a separate font for capitals; VPS lacks some capitals. Such shared
+///   codes decode to lowercase. VISCII's own codes for `Ẳ Ẵ Ẫ Õ Ỷ Ỹ Ỵ` decode to capitals,
+///   although [`encode_charset`] writes the lowercase codes for them. A code shared by two different letters (`Ặ` and
+///   `Ụ` in BKHCM 1) is left undecoded.
+/// - Charsets that use ASCII for letters also decode ASCII text that happens to match: VIQR
+///   (`dd` becomes `đ`, a full stop after a vowel becomes a dot below unless written `\.`,
+///   the VIQR escape), NCR, C string, and
+///   BKHCM 1, which encodes `Đ Ấ Ý Ỳ Ỷ Ỹ` as `}`, `~`, `{`, `^`, `` ` `` and `|`.
+/// - [`Charset::UnicodeCompound`] is the letter with its hat or horn plus a combining tone
+///   mark, as [`encode_charset`] writes it, not full NFD.
+///
+/// # Example
+/// ```rust
+/// use bamboo_core::{decode_charset, encode_charset, Charset};
+///
+/// assert_eq!(decode_charset(Charset::VniWindows, "tieáng Vieät"), "tiếng Việt");
+///
+/// let viqr = encode_charset(Charset::Viqr, "tiếng Việt");
+/// assert_eq!(decode_charset(Charset::Viqr, &viqr), "tiếng Việt");
+/// ```
+pub fn decode_charset<'a>(charset: Charset, input: &'a str) -> Cow<'a, str> {
+    let Some(table) = DECODE_TABLES.get(charset.as_str()) else {
+        return Cow::Borrowed(input);
+    };
+
+    let mut output: Option<String> = None;
+    let mut i = 0;
+    while i < input.len() {
+        let rest = &input[i..];
+        let first = rest.chars().next().unwrap_or_default();
+        if charset == Charset::Viqr
+            && first == '\\'
+            && let Some(next) = rest[1..].chars().next().filter(char::is_ascii_punctuation)
+        {
+            output.get_or_insert_with(|| input[..i].to_string()).push(next);
+            i += 1 + next.len_utf8();
+            continue;
+        }
+        let found = (1..=table.max_len.min(rest.len()))
+            .filter(|_| table.starts.contains(&first))
+            .rev()
+            .filter(|&len| rest.is_char_boundary(len))
+            .find_map(|len| table.chars.get(&rest[..len]).map(|&c| (c, len)));
+        match found {
+            Some((c, len)) if output.is_some() || rest[..len].chars().ne(std::iter::once(c)) => {
+                output.get_or_insert_with(|| input[..i].to_string()).push(c);
+                i += len;
+            }
+            _ => {
+                if let Some(out) = output.as_mut() {
+                    out.push(first);
+                }
+                i += first.len_utf8();
+            }
+        }
+    }
+    output.map_or(Cow::Borrowed(input), Cow::Owned)
 }
 
 /// Returns an iterator over all supported character set names without heap allocations.
