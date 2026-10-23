@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-23
+
+### Build
+
+- Broadened the `phf` compatibility range to `>=0.11, <0.14`. bamboo-core uses APIs available
+  throughout that range, allowing Debian unstable's `phf 0.11.3` without downstream patches.
+
 ### Documentation
 
 - Added a crate-level rustdoc migration guide for 0.4.x callers. It lists every deprecated API,
