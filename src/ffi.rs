@@ -2,6 +2,9 @@
 //!
 //! This module provides an `extern "C"` API for integrating Bamboo with
 //! other languages like C, C++, Python, and IME frameworks (Fcitx5, `IBus`).
+//! `include/bamboo_core.h` declares the supported C ABI. It exposes only the
+//! composition engine: frontends own their preedit UI, event routing,
+//! dictionaries, macros, and platform integration.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -11,9 +14,9 @@ use std::ptr;
 use std::sync::Mutex;
 
 use crate::config::Config;
-use crate::engine::Engine;
+use crate::engine::{Engine, LastWordForm, ToneRefresh};
 use crate::input_method::InputMethod;
-use crate::mode::Mode;
+use crate::mode::{Mode, OutputOptions};
 
 /// C-compatible enum representing supported Vietnamese input methods for FFI.
 #[repr(C)]
@@ -90,6 +93,7 @@ where
 }
 
 /// Initializes the global engine with the default Telex input method.
+#[deprecated(since = "0.5.3", note = "use bamboo_engine_new for an independent engine instance")]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_setup() {
     let mut guard = match GLOBAL_ENGINE.lock() {
@@ -100,6 +104,7 @@ pub extern "C" fn bamboo_setup() {
 }
 
 /// Resets the global engine state, clearing the current composition.
+#[deprecated(since = "0.5.3", note = "use bamboo_engine_reset for an independent engine instance")]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_reset() {
     with_engine(|e| e.reset());
@@ -119,6 +124,10 @@ pub extern "C" fn bamboo_reset() {
 ///     * 6: Telex + VNI
 ///     * 7: Telex + VNI + VIQR
 ///     * 8: VNI French Layout
+#[deprecated(
+    since = "0.5.3",
+    note = "use bamboo_engine_set_input_method for an independent engine instance"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_set_input_method(method: i32) {
     let im = BambooMethod::from_i32(method).to_input_method();
@@ -140,6 +149,10 @@ pub extern "C" fn bamboo_set_input_method(method: i32) {
 ///
 /// A pointer to a null-terminated UTF-8 string.
 /// **Note:** The caller is responsible for freeing the returned string using [`bamboo_free_string`].
+#[deprecated(
+    since = "0.5.3",
+    note = "use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_process_key(key: u32, is_vietnamese: i32) -> *mut c_char {
     with_engine(|e| {
@@ -159,6 +172,10 @@ pub extern "C" fn bamboo_process_key(key: u32, is_vietnamese: i32) -> *mut c_cha
 /// - `out_buf` must be a valid pointer to a buffer of at least `out_cap` bytes if `out_cap > 0`.
 /// - `out_len`, `backspaces_chars`, and `backspaces_bytes` must be valid, non-null pointers to `usize`.
 /// - The caller must ensure that no other thread is accessing the global engine simultaneously (this function uses a Mutex internally for safety, but pointer validity is the caller's responsibility).
+#[deprecated(
+    since = "0.5.3",
+    note = "use bamboo_engine_process_key_buf for an independent engine instance"
+)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bamboo_process_key_buf(
     key: u32,
@@ -227,6 +244,7 @@ pub unsafe extern "C" fn bamboo_process_key_buf(
 ///
 /// A pointer to a null-terminated UTF-8 string.
 /// **Note:** The caller is responsible for freeing the returned string using [`bamboo_free_string`].
+#[deprecated(since = "0.5.3", note = "use bamboo_engine_output for an independent engine instance")]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_output() -> *mut c_char {
     with_engine(|e| {
@@ -236,6 +254,10 @@ pub extern "C" fn bamboo_output() -> *mut c_char {
 }
 
 /// Removes the last character from the current composition in the global engine.
+#[deprecated(
+    since = "0.5.3",
+    note = "use bamboo_engine_undo_last_key with an explicit tone-refresh policy"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_remove_last_char() {
     with_engine(Engine::undo_last_key);
@@ -258,6 +280,18 @@ pub unsafe extern "C" fn bamboo_free_string(s: *mut c_char) {
 
 /// Opaque handle to a Bamboo Engine instance.
 pub type BambooEngine = Engine;
+
+const fn mode_from_i32(mode: i32) -> Mode {
+    if mode == 0 { Mode::English } else { Mode::Vietnamese }
+}
+
+const fn tone_refresh_from_i32(policy: i32) -> ToneRefresh {
+    if policy == 1 { ToneRefresh::PreserveSnapshot } else { ToneRefresh::Recompute }
+}
+
+const fn last_word_form_from_i32(form: i32) -> LastWordForm {
+    if form == 1 { LastWordForm::RawKeystrokes } else { LastWordForm::Vietnamese }
+}
 
 /// Creates a new Bamboo Engine instance.
 ///
@@ -323,6 +357,10 @@ pub unsafe extern "C" fn bamboo_engine_free(engine: *mut BambooEngine) {
 /// # Safety
 /// - `engine` must be a valid, non-null pointer to a `BambooEngine` instance.
 /// - The caller is responsible for freeing the returned string using `bamboo_free_string`.
+#[deprecated(
+    since = "0.5.3",
+    note = "use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf"
+)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bamboo_engine_process(engine: *mut BambooEngine, key: u32) -> *mut c_char {
     // SAFETY: engine pointer checked for non-null and safely converted to a mutable reference.
@@ -334,6 +372,169 @@ pub unsafe extern "C" fn bamboo_engine_process(engine: *mut BambooEngine, key: u
     }
     let out = e.output();
     CString::new(out.as_ref()).unwrap_or_default().into_raw()
+}
+
+/// Processes a key in an explicit mode and returns the active composition.
+///
+/// `mode` is 0 for English and non-zero for Vietnamese. The returned string
+/// must be released with [`bamboo_free_string`]. This is the allocating
+/// convenience form; use [`bamboo_engine_process_key_buf`] in a key loop.
+///
+/// # Safety
+/// `engine` must be a valid, non-null engine pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_process_key_mode(
+    engine: *mut BambooEngine,
+    key: u32,
+    mode: i32,
+) -> *mut c_char {
+    // SAFETY: the caller supplies a live exclusive engine pointer.
+    let Some(e) = (unsafe { engine.as_mut() }) else {
+        return ptr::null_mut();
+    };
+    if let Some(c) = char::from_u32(key) {
+        e.process_key(c, mode_from_i32(mode));
+    }
+    CString::new(e.output_str()).unwrap_or_default().into_raw()
+}
+
+/// Resets a specific engine, discarding active and committed text.
+///
+/// # Safety
+/// `engine` must be a valid, non-null engine pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_reset(engine: *mut BambooEngine) {
+    // SAFETY: the caller supplies a live exclusive engine pointer.
+    if let Some(e) = unsafe { engine.as_mut() } {
+        e.reset();
+    }
+}
+
+/// Commits the active composition into the engine's full-text stream.
+///
+/// # Safety
+/// `engine` must be a valid, non-null engine pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_commit(engine: *mut BambooEngine) {
+    // SAFETY: the caller supplies a live exclusive engine pointer.
+    if let Some(e) = unsafe { engine.as_mut() } {
+        e.commit();
+    }
+}
+
+/// Replaces an engine's configuration using [`Config::from_flags`].
+///
+/// # Safety
+/// `engine` must be a valid, non-null engine pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_set_config_flags(engine: *mut BambooEngine, flags: u32) {
+    // SAFETY: the caller supplies a live exclusive engine pointer.
+    if let Some(e) = unsafe { engine.as_mut() } {
+        e.set_config(Config::from_flags(flags));
+    }
+}
+
+/// Returns the current configuration in the stable [`Config::to_flags`] form.
+/// A null engine yields zero.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer when non-null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_config_flags(engine: *const BambooEngine) -> u32 {
+    // SAFETY: the caller supplies a live engine pointer when non-null.
+    unsafe { engine.as_ref() }.map_or(0, |e| e.config().to_flags())
+}
+
+/// Replaces the input method while preserving the engine configuration.
+///
+/// # Safety
+/// `engine` must be a valid, non-null engine pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_set_input_method(engine: *mut BambooEngine, method: i32) {
+    // SAFETY: the caller supplies a live exclusive engine pointer.
+    if let Some(e) = unsafe { engine.as_mut() } {
+        let config = e.config();
+        *e = Engine::with_config(BambooMethod::from_i32(method).to_input_method(), config);
+    }
+}
+
+/// Returns the processed text for the requested [`OutputOptions`] bit mask.
+/// The returned string must be released with [`bamboo_free_string`].
+///
+/// # Safety
+/// `engine` must be a valid, non-null engine pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_output(
+    engine: *const BambooEngine,
+    options: u32,
+) -> *mut c_char {
+    // SAFETY: the caller supplies a live engine pointer.
+    let Some(e) = (unsafe { engine.as_ref() }) else {
+        return ptr::null_mut();
+    };
+    CString::new(e.get_processed_str_cow(OutputOptions::from_bits_truncate(options)).as_ref())
+        .unwrap_or_default()
+        .into_raw()
+}
+
+/// Returns non-zero when `key` can affect the active composition.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer when non-null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_can_process_key(
+    engine: *const BambooEngine,
+    key: u32,
+) -> i32 {
+    // SAFETY: the caller supplies a live engine pointer when non-null.
+    unsafe { engine.as_ref() }.zip(char::from_u32(key)).is_some_and(|(e, c)| e.can_process_key(c))
+        as i32
+}
+
+/// Returns non-zero when the active composition is a complete valid word.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer when non-null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_is_valid_word(engine: *const BambooEngine) -> i32 {
+    // SAFETY: the caller supplies a live engine pointer when non-null.
+    unsafe { engine.as_ref() }.is_some_and(Engine::is_valid_word) as i32
+}
+
+/// Returns non-zero when the active composition is a valid incomplete prefix.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer when non-null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_is_valid_prefix(engine: *const BambooEngine) -> i32 {
+    // SAFETY: the caller supplies a live engine pointer when non-null.
+    unsafe { engine.as_ref() }.is_some_and(Engine::is_valid_prefix) as i32
+}
+
+/// Undoes one physical keypress. `tone_refresh` is 0 to recompute tone
+/// placement and 1 to preserve the prior snapshot's placement.
+///
+/// # Safety
+/// `engine` must be a valid, non-null engine pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_undo_last_key(engine: *mut BambooEngine, tone_refresh: i32) {
+    // SAFETY: the caller supplies a live exclusive engine pointer.
+    if let Some(e) = unsafe { engine.as_mut() } {
+        e.undo_last_key_with(tone_refresh_from_i32(tone_refresh));
+    }
+}
+
+/// Restores the active last word. `form` is 0 for Vietnamese processing and
+/// 1 for raw keystrokes.
+///
+/// # Safety
+/// `engine` must be a valid, non-null engine pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_restore_last_word(engine: *mut BambooEngine, form: i32) {
+    // SAFETY: the caller supplies a live exclusive engine pointer.
+    if let Some(e) = unsafe { engine.as_mut() } {
+        e.restore_last_word_as(last_word_form_from_i32(form));
+    }
 }
 
 /// Removes the last output character (grapheme) from the active composition
@@ -438,6 +639,7 @@ pub unsafe extern "C" fn bamboo_engine_process_key_buf(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use std::ffi::CStr;
@@ -574,6 +776,50 @@ mod tests {
                 -2
             );
 
+            bamboo_engine_free(engine);
+        }
+    }
+
+    #[test]
+    fn test_ffi_current_engine_api() {
+        let engine = bamboo_engine_new_with_flags(0, 0x07);
+        assert!(!engine.is_null());
+
+        // SAFETY: the engine is valid until the final free, and strings are
+        // released through the matching FFI function.
+        unsafe {
+            assert_eq!(bamboo_engine_config_flags(engine), 0x07);
+            assert_eq!(bamboo_engine_can_process_key(engine, 's' as u32), 1);
+            assert_eq!(bamboo_engine_can_process_key(engine, '!' as u32), 0);
+
+            for c in "tieengs".chars() {
+                let text = bamboo_engine_process_key_mode(engine, c as u32, 1);
+                assert!(!text.is_null());
+                bamboo_free_string(text);
+            }
+            assert_eq!(bamboo_engine_is_valid_word(engine), 1);
+            let output = bamboo_engine_output(engine, OutputOptions::NONE.bits());
+            assert_eq!(CStr::from_ptr(output).to_str().unwrap(), "tiếng");
+            bamboo_free_string(output);
+
+            bamboo_engine_undo_last_key(engine, 0);
+            let output = bamboo_engine_output(engine, OutputOptions::NONE.bits());
+            assert_eq!(CStr::from_ptr(output).to_str().unwrap(), "tiêng");
+            bamboo_free_string(output);
+
+            bamboo_engine_commit(engine);
+            let output = bamboo_engine_output(engine, OutputOptions::FULL_TEXT.bits());
+            assert_eq!(CStr::from_ptr(output).to_str().unwrap(), "tiêng");
+            bamboo_free_string(output);
+
+            bamboo_engine_reset(engine);
+            assert_eq!(bamboo_engine_is_valid_prefix(engine), 1);
+            bamboo_engine_set_config_flags(engine, 0x07 | 0x08);
+            assert_eq!(bamboo_engine_config_flags(engine), 0x0F);
+            bamboo_engine_set_input_method(engine, BambooMethod::Vni as i32);
+            let text = bamboo_engine_process_key_mode(engine, 'a' as u32, 0);
+            assert_eq!(CStr::from_ptr(text).to_str().unwrap(), "a");
+            bamboo_free_string(text);
             bamboo_engine_free(engine);
         }
     }

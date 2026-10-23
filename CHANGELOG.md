@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-23
+
+### Added
+
+- Added a documented instance-based C API for the current engine operations: explicit input mode,
+  reset, commit, configuration and input-method changes, processed output options, key handling,
+  validity checks, named undo policies, and last-word restoration.
+- Added the distributable `include/bamboo_core.h` C header, including stable constants for input
+  methods, modes, configuration flags, output options, and named policies.
+- The crate now emits `staticlib` and `cdylib` artifacts in addition to `rlib`, so C and C++
+  consumers can link the exported ABI directly.
+
+### Deprecated
+
+- Deprecated the process-wide FFI entrypoints in favor of independent `BambooEngine` instances.
+  Deprecated `bamboo_engine_process`, whose implicit Vietnamese mode and allocating result are
+  superseded by `bamboo_engine_process_key_mode` and `bamboo_engine_process_key_buf`.
+
 ## [0.5.2] - 2026-10-23
 
 ### Build

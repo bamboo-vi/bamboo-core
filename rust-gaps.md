@@ -1,6 +1,6 @@
 # Các giới hạn hành vi đã biết (bamboo-rust)
 
-> **Cập nhật 23/10/2026 — 0.5.1.** Tài liệu này chỉ ghi các điểm còn cần chốt
+> **Cập nhật 23/10/2026 — 0.5.3.** Tài liệu này chỉ ghi các điểm còn cần chốt
 > hợp đồng hoặc cải thiện. Các số liệu lịch sử nằm ở
 > `../bench-fcitx5/comparison-2026-10-21.md`; chúng không phải kết luận cho mã hiện tại.
 

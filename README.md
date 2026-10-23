@@ -22,7 +22,7 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 
 ```toml
 [dependencies]
-bamboo-core = "0.5.1"
+bamboo-core = "0.5.3"
 ```
 
 ### Legacy Charset Conversion (0.5.1)
@@ -68,6 +68,29 @@ for removal in 1.0.0.
 
 Boolean configuration switches such as `auto_correct(bool)` and `free_tone_marking(bool)`
 remain unchanged because they express ordinary enabled/disabled state.
+
+## C and C++ integration
+
+Version 0.5.3 ships `include/bamboo_core.h` and builds both `libbamboo_core.a` and
+`libbamboo_core.so`. Use a `BambooEngine` per input context; it owns only composition state.
+The host application remains responsible for preedit presentation, committing text, key-event
+routing, dictionaries, macros, and platform integration.
+
+```c
+#include <bamboo_core.h>
+
+BambooEngine *engine = bamboo_engine_new(BAMBOO_METHOD_TELEX);
+char *preedit = bamboo_engine_process_key_mode(
+    engine, 'a', BAMBOO_MODE_VIETNAMESE);
+/* Use preedit, then release it with the allocator from this library. */
+bamboo_free_string(preedit);
+bamboo_engine_free(engine);
+```
+
+For a normal keystroke loop, prefer `bamboo_engine_process_key_buf`: it returns the insert text
+and deletion counts in caller-owned storage without allocating. The process-wide `bamboo_*`
+entrypoints and `bamboo_engine_process` are deprecated; compilers that support deprecation
+attributes warn when the C header is used.
 
 ## Quick Start — IME Integration
 

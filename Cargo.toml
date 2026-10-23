@@ -1,6 +1,6 @@
 [package]
 name = "bamboo-core"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 rust-version = "1.88"
 
@@ -20,8 +20,14 @@ include = [
     "Cargo.toml",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "include/bamboo_core.h"
 ]
+
+[lib]
+# Keep the Rust library for Rust callers while producing linkable artifacts for
+# the C ABI declared in `ffi`.
+crate-type = ["rlib", "staticlib", "cdylib"]
 
 [package.metadata.docs.rs]
 all-features = true
