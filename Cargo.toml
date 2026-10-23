@@ -29,7 +29,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 bitflags = "2.11.1"
-phf = { version = "0.13.1", features = ["macros"] }
+phf = { version = ">=0.11, <0.14", features = ["macros"] }
 rayon = { version = "1.10", optional = true }
 rustc-hash = "2"
 wasm-bindgen = { version = "0.2", optional = true }
