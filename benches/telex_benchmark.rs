@@ -98,13 +98,13 @@ fn main() {
         let (mut bp, mut bb) = setup_engines!();
         let cases: &[(&str, &str)] = &[
             ("tieengs", "tiếng"),
-            ("vietj", "việt"),
+            ("vieetj", "việt"),
             ("huowng", "hương"),
             ("quoocs", "quốc"),
             ("nguwowif", "người"),
-            ("nghieengs", "nghiếng"),
-            ("khongf", "không"),
-            ("duowcj", "được"),
+            ("thuyeets", "thuyết"),
+            ("khoong", "không"),
+            ("dduowcj", "được"),
         ];
         println!("\n=== Category 2: Common words (warm) ===");
         for &(input, expected) in cases {
@@ -128,8 +128,11 @@ fn main() {
     // Category 3: sentence
     {
         let (mut bp, mut bb) = setup_engines!();
-        let sentences: &[&str] =
-            &["hom nay troij depf qua", "toi dang hoc lap trinhr", "tiengf vietj ratj depf"];
+        let sentences: &[&str] = &[
+            "hoom nay troiwf depj quas",
+            "tooi ddang hocj laapj trinhf",
+            "tieengs vieetj raats depj",
+        ];
         println!("\n=== Category 3: Sentences ===");
         for &input in sentences {
             let inp = input.to_string();
@@ -209,8 +212,8 @@ fn main() {
         let syllables: &[&str] = &[
             "a", "af", "as", "ar", "ax", "aj", "e", "ef", "es", "er", "ex", "ej", "aa", "aas",
             "aaf", "aar", "aax", "aaj", "ee", "ees", "eef", "oo", "oos", "aw", "aws", "awf", "ow",
-            "ows", "owf", "uw", "uws", "uwf", "dd", "tieengs", "vietj", "huowng", "quoocs",
-            "nguwowif", "khongf",
+            "ows", "owf", "uw", "uws", "uwf", "dd", "tieengs", "vieetj", "huowng", "quoocs",
+            "nguwowif", "khoong",
         ];
         println!("\n=== Category 7: Comprehensive syllables (avg) ===");
         let inputs: Vec<String> = syllables.iter().map(|s| s.to_string()).collect();

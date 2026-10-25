@@ -103,7 +103,7 @@ fn measure_allocs<F: FnOnce()>(f: F) -> (usize, usize) {
 fn warm_telex() -> Engine {
     let mut e = Engine::from_preset(InputMethodPreset::Telex);
     // Pre-warm DFA / strings so later measurements isolate the steady-state hot path.
-    e.process_str("tieengs vietj nguwowif", Mode::Vietnamese);
+    e.process_str("tieengs vieetj nguwowif", Mode::Vietnamese);
     e.commit();
     e
 }
@@ -256,13 +256,13 @@ fn bounded_alloc_jit_new_state() {
 #[serial]
 fn zero_alloc_process_key_edit() {
     let mut e = warm_telex();
-    e.process_str("vietj", Mode::Vietnamese);
+    e.process_str("vieetj", Mode::Vietnamese);
     e.commit();
 
     let (n, _) = measure_allocs(|| {
         for _ in 0..50 {
             e.reset();
-            for ch in "vietj".chars() {
+            for ch in "vieetj".chars() {
                 let d = e.process_key_edit(ch, Mode::Vietnamese);
                 black_box(d);
             }

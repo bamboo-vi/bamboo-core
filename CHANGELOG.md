@@ -201,7 +201,7 @@ All notable changes to this project will be documented in this file.
 - **Zero-Allocation Output:** Cached preedit buffer enables `output_str(&self) -> &str` and `output(&self) -> Cow<'_, str>` without heap allocations.
 - **Counting Sort Rule Partitioning:** Precomputed `EngineRules` with Counting Sort into direct-indexed ASCII slices (`[(u16, u16); 128]`) and partitioned non-ASCII rules, eliminating hot-path linear rule scans.
 - **Zero-Copy Engine Preset Sharing:** Built-in presets (`Telex`, `VNI`, `VIQR`, etc.) now share rule tables via `Arc<EngineRules>` and `Arc<InputMethod>` stored in `LazyLock`, reducing `Engine` stack size from 6,176 B to 5,360 B (5.2 KB) and making `Engine::from_preset()` instantaneous with zero heap copying.
-- **Sub-Microsecond Keystroke Latency:** Measured single-word latency down to ~140 ns ('vietj' -> 'việt') and full 27-character sentence streams at ~1.3 µs (8.7x faster than skey, up to 16x faster on paragraphs).
+- **Sub-Microsecond Keystroke Latency:** Measured single-word latency down to ~140 ns ('vieetj' -> 'việt') and full 27-character sentence streams at ~1.3 µs (8.7x faster than skey, up to 16x faster on paragraphs).
 
 ### Safety & FFI Invariants
 - **Strict Safe FFI Boundaries:** Enforced `#![deny(unsafe_op_in_unsafe_fn)]` across `ffi.rs`.

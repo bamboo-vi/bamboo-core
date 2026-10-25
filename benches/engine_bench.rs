@@ -172,10 +172,10 @@ fn bench_mixed_typing() {
     bamboo.warm_up();
     let mut uvie = UltraFastViEngine::new();
 
-    let keys: Vec<char> = "hoc rust tieengs vietj tieengs".chars().collect();
+    let keys: Vec<char> = "hocj rust tieengs vieetj tieengs".chars().collect();
 
     bench_pair(
-        "mixed typing (29 chars)",
+        "mixed typing (32 chars)",
         || {
             bamboo.reset();
             for &k in &keys {
@@ -197,19 +197,8 @@ fn bench_many_words() {
     let mut uvie = UltraFastViEngine::new();
 
     let words = [
-        "tieengs",
-        "vietj",
-        "huowng",
-        "quoocs",
-        "nguwowif",
-        "viẹtj",
-        "namf",
-        "chuyeenn",
-        "thuyeet",
-        "truwowjt",
-        "nghieengs",
-        "hoas",
-        "khuỵu",
+        "tieengs", "vieetj", "huowng", "quoocs", "nguwowif", "thuyeets", "Nam", "chuyeenj",
+        "dduowcj", "truwowjt", "nghieeng", "hoas", "mowis",
     ];
 
     bench_pair(
@@ -348,11 +337,11 @@ fn bench_worst_case_syllable() {
     bamboo.warm_up();
     let mut uvie = UltraFastViEngine::new();
 
-    // "nghieengs" = nghiếng (9 chars, complex transformations)
-    let keys: Vec<char> = "nghieengs".chars().collect();
+    // "nghieeng" = nghiêng (8 chars, complex transformations)
+    let keys: Vec<char> = "nghieeng".chars().collect();
 
     bench_pair(
-        "worst-case syllable (nghieengs)",
+        "worst-case syllable (nghieeng)",
         || {
             bamboo.reset();
             for &k in &keys {

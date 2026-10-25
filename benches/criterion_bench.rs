@@ -20,7 +20,7 @@ fn warm_engine(keys: &str) -> Engine {
 
 fn bench_dfa_hit(c: &mut Criterion) {
     let mut group = c.benchmark_group("dfa_hit");
-    for word in ["tieengs", "vietj", "nguwowif", "dduwowngf", "khuyeens"] {
+    for word in ["tieengs", "vieetj", "nguwowif", "dduwowngf", "khuyeens"] {
         group.bench_with_input(BenchmarkId::new("keystroke_stream", word), word, |b, w| {
             let mut e = warm_engine(w);
             b.iter(|| {
@@ -43,7 +43,7 @@ fn bench_dfa_miss_slow(c: &mut Criterion) {
         b.iter_batched_ref(
             fresh_engine,
             |e| {
-                for ch in "nghieengs".chars() {
+                for ch in "nghieeng".chars() {
                     e.process_key(black_box(ch), Mode::Vietnamese);
                 }
                 black_box(e.output_str());
@@ -70,10 +70,10 @@ fn bench_output(c: &mut Criterion) {
 fn bench_delta(c: &mut Criterion) {
     let mut group = c.benchmark_group("delta");
     group.bench_function("process_key_edit_per_key", |b| {
-        let mut e = warm_engine("vietj");
+        let mut e = warm_engine("vieetj");
         b.iter(|| {
             e.reset();
-            for ch in "vietj".chars() {
+            for ch in "vieetj".chars() {
                 let d = e.process_key_edit(black_box(ch), Mode::Vietnamese);
                 black_box(d);
             }

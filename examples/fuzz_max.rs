@@ -266,7 +266,7 @@ fn main() {
     // ---- 5. Mixed realistic: valid + invalid alternating, ON ----
     {
         let mut e = Engine::new(InputMethod::telex());
-        let valid = ["tieengs", "vietj", "huowng", "khongf", "duowcj", "nghieengs"];
+        let valid = ["tieengs", "vieetj", "huowng", "khongf", "duowcj", "nghieengs"];
         let mut keys = 0;
         for i in 0..n {
             let w = if i % 2 == 0 { valid[i % valid.len()].to_string() } else { unique_word(i) };

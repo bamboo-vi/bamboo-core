@@ -170,26 +170,9 @@ fn test_ram_growth() {
     println!("{}", "-".repeat(72));
 
     let words = [
-        "tieengs",
-        "vietj",
-        "huowng",
-        "quoocs",
-        "nguwowif",
-        "namf",
-        "chuyeenn",
-        "thuyeet",
-        "truwowjt",
-        "nghieengs",
-        "hoas",
-        "khongf",
-        "duowcj",
-        "nhuwngf",
-        "moiw",
-        "laaj",
-        "tuoif",
-        "troiwf",
-        "doocs",
-        "muaws",
+        "tieengs", "vieetj", "huowng", "quoocs", "nguwowif", "nam", "chuyeenj", "thuyeets",
+        "truwowjt", "nghieeng", "hoas", "khoong", "dduowcj", "nhuwngf", "mowis", "laj", "tuoior",
+        "troiwf", "ddocj", "muwa",
     ];
 
     for &word_count in &[10usize, 100, 1000, 5000, 10000] {
@@ -241,7 +224,7 @@ fn test_dfa_growth() {
 
     let mut e = Engine::new(InputMethod::telex());
 
-    let input = "tieengs vietj huowng quoocs nguwowif namf chuyeenn thuyeet truwowjt nghieengs hoas khongf duowcj nhuwngf moiw laaj tuoif troiwf doocs muaws";
+    let input = "tieengs vieetj huowng quoocs nguwowif nam chuyeenj thuyeets truwowjt nghieeng hoas khoong dduowcj nhuwngf mowis laj tuoior troiwf ddocj muwa";
     let keys: Vec<char> = input.chars().collect();
 
     for (i, &k) in keys.iter().enumerate() {
@@ -281,7 +264,7 @@ fn test_reset_leak() {
     let before = snapshot();
 
     for _ in 0..1000 {
-        e.process_str("tieengs vietj huowng quoocs nguwowif", Mode::Vietnamese);
+        e.process_str("tieengs vieetj huowng quoocs nguwowif", Mode::Vietnamese);
         e.commit();
         e.reset();
     }
@@ -368,16 +351,15 @@ fn test_realistic_session() {
     println!("=== 8. Realistic long session (100 sentences) ===");
 
     let sentences = [
-        "hom nay troij depf qua, toi di choiwj voiwf banj bef.",
-        "tiengf vietj ratj depf va phuwf tapj, canf phaij hocj nhieeuf.",
-        "chao mowf banf ddenf vieetj namf, quoocs depf lamf.",
-        "tuoif treo hom nayf hocj ratj chams va nghifeng tueej.",
-        "duownjg nhuw laajf nguwowif nha dangf nauw anwj.",
-        "buwows saungf hom nayf troijf ratj depf, khongf cooj muaaj.",
-        "anhf ayf laf mojt nguwowif totj buojngf, luoonf giuwp doj moiwf nguwowif.",
-        "truwowjt khi di nguwr, toi thuwowngf doocj sajspj motf cuoons sajspj.",
-        "nguwowif vietj namf tuowngf tuwf ratj caof, khongf soj gianj nanf.",
-        "moij ngayf toi ddayf tuowfj lucj 6 gioof sangf deej tapj theer ducj.",
+        "hoom nay troiwf depj quas, tooi ddi choiw vowis banj bef.",
+        "tieengs vieetj raats depj vaf phuwcs tapj, caanf phair hocj nhieeuf.",
+        "chaof muwngf banj ddeens Vieetj Nam, ddaay laf quoocs gia depj.",
+        "tuooir treer hoom nay hocj raats chawmf vaf thoong minh.",
+        "saangs hoom nay troiwf raats depj, khoong cos muwa.",
+        "anh aays laf mojt nguwowif toots bujng, luoon giups ddoox moij nguwowif.",
+        "truwowcs khi ddi ngur, tooi thuowngf ddocj sachs mojt cuoons sachs.",
+        "nguwowif Vieetj Nam raats hieeus khachs, khoong sowj gian nan.",
+        "mooir ngayf tooi daayj tuwf lucj 6 giof saangs ddeer tapj theer dujc.",
     ];
 
     reset_counters();
@@ -417,16 +399,15 @@ fn test_extreme_vietnamese() {
     println!("=== 9. EXTREME Vietnamese — 10,000 sentences ===");
 
     let sentences = [
-        "hom nay troij depf qua, toi di choiwj voiwf banj bef.",
-        "tiengf vietj ratj depf va phuwf tapj, canf phaij hocj nhieeuf.",
-        "chao mowf banf ddenf vieetj namf, quoocs depf lamf.",
-        "tuoif treo hom nayf hocj ratj chams va nghifeng tueej.",
-        "duownjg nhuw laajf nguwowif nha dangf nauw anwj.",
-        "buwows saungf hom nayf troijf ratj depf, khongf cooj muaaj.",
-        "anhf ayf laf mojt nguwowif totj buojngf, luoonf giuwp doj moiwf nguwowif.",
-        "truwowjt khi di nguwr, toi thuwowngf doocj sajspj motf cuoons sajspj.",
-        "nguwowif vietj namf tuowngf tuwf ratj caof, khongf soj gianj nanf.",
-        "moij ngayf toi ddayf tuowfj lucj 6 gioof sangf deej tapj theer ducj.",
+        "hoom nay troiwf depj quas, tooi ddi choiw vowis banj bef.",
+        "tieengs vieetj raats depj vaf phuwcs tapj, caanf phair hocj nhieeuf.",
+        "chaof muwngf banj ddeens Vieetj Nam, ddaay laf quoocs gia depj.",
+        "tuooir treer hoom nay hocj raats chawmf vaf thoong minh.",
+        "saangs hoom nay troiwf raats depj, khoong cos muwa.",
+        "anh aays laf mojt nguwowif toots bujng, luoon giups ddoox moij nguwowif.",
+        "truwowcs khi ddi ngur, tooi thuowngf ddocj sachs mojt cuoons sachs.",
+        "nguwowif Vieetj Nam raats hieeus khachs, khoong sowj gian nan.",
+        "mooir ngayf tooi daayj tuwf lucj 6 giof saangs ddeer tapj theer dujc.",
     ];
 
     reset_counters();
@@ -630,9 +611,9 @@ fn test_dfa_saturation() {
 fn test_sustained_no_commit() {
     println!("=== 12. Sustained typing — no commit, single long word ===");
 
-    let long_input = "tieengsvietjhuowngquoocsnguwowifnamfchuyeennthuyeetruw\
-                      owjtnghieengshoaskhongfduowcjnhuwngfmoiwlaajtuoiftroiwf\
-                      doocsmuawsphujquyfnguxhoaxbuwowsngoiflamfanhfbuocjduownjg";
+    let long_input = "tieengsvieetjhuowngquoocsnguwowifnamchuyeenjthuyeetstruw\
+                      owjtnghieengshoaskhoongdduowcjnhuwngfmowislajtuoior\
+                      troiwfddocjmuwa";
 
     reset_counters();
     let mut e = Engine::new(InputMethod::telex());

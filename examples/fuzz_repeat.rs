@@ -2,7 +2,7 @@ use bamboo_core::{Config, Engine, InputMethod, Mode};
 fn main() {
     let words = [
         "tieengs",
-        "vietj",
+        "vieetj",
         "huowng",
         "quoocs",
         "nguwowif",

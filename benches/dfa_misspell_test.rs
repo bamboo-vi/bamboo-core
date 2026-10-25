@@ -59,7 +59,7 @@ fn main() {
     // Test 3: Mixed valid + invalid (realistic misspelling)
     println!("\n--- Test 3: Mixed valid + invalid x10000 ---");
     e.warm_up();
-    let valid = ["tieengs", "vietj", "huowng", "khongf", "duowcj"];
+    let valid = ["tieengs", "vieetj", "huowng", "khoong", "dduowcj"];
     let invalid = ["tieengx", "viezx", "huowq", "khonq", "duowz"];
     for i in 0..10000 {
         if i % 2 == 0 {
