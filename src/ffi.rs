@@ -15,7 +15,7 @@ use std::sync::Mutex;
 
 use crate::config::Config;
 use crate::engine::{Engine, LastWordForm, ToneRefresh};
-use crate::input_method::InputMethod;
+use crate::input_method::{InputMethod, InputMethodPreset};
 use crate::mode::{Mode, OutputOptions};
 
 /// C-compatible enum representing supported Vietnamese input methods for FFI.
@@ -77,6 +77,73 @@ impl BambooMethod {
 
 static GLOBAL_ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
 
+const MAX_EDIT_BYTES: usize = crate::engine::MAX_ACTIVE_TRANS * 4;
+
+struct ProcessKeyOutput {
+    buf: *mut u8,
+    capacity: usize,
+    len: *mut usize,
+    backspaces_chars: *mut usize,
+    backspaces_bytes: *mut usize,
+}
+
+/// Applies a key only when the caller has room for every possible edit.
+///
+/// # Safety
+/// Output pointers must be writable, non-null, aligned, mutually non-overlapping,
+/// and must not point into the engine.
+/// When `out_cap >= MAX_EDIT_BYTES`, `out_buf` must point to `out_cap` writable
+/// bytes and must not overlap the output pointers or the engine.
+unsafe fn process_key_buf(
+    engine: &mut Engine,
+    key: u32,
+    is_vietnamese: i32,
+    output: ProcessKeyOutput,
+) -> i32 {
+    if output.len.is_null()
+        || output.backspaces_chars.is_null()
+        || output.backspaces_bytes.is_null()
+    {
+        return -1;
+    }
+    let Some(key) = char::from_u32(key) else {
+        // SAFETY: The caller guarantees the checked output pointers are writable.
+        unsafe {
+            ptr::write(output.len, 0);
+            ptr::write(output.backspaces_chars, 0);
+            ptr::write(output.backspaces_bytes, 0);
+        }
+        return 0;
+    };
+    if output.capacity < MAX_EDIT_BYTES {
+        // The engine is unchanged, so the caller can grow the buffer and retry.
+        // SAFETY: The caller guarantees the checked output pointers are writable.
+        unsafe {
+            ptr::write(output.len, MAX_EDIT_BYTES);
+            ptr::write(output.backspaces_chars, 0);
+            ptr::write(output.backspaces_bytes, 0);
+        }
+        return 1;
+    }
+    if output.buf.is_null() {
+        return -1;
+    }
+
+    let mode = if is_vietnamese != 0 { Mode::Vietnamese } else { Mode::English };
+    let edit = engine.process_key_edit(key, mode);
+    let bytes = edit.insert.as_bytes();
+    debug_assert!(bytes.len() <= MAX_EDIT_BYTES);
+
+    // SAFETY: The caller guarantees these pointers are writable and non-overlapping.
+    unsafe {
+        ptr::write(output.len, bytes.len());
+        ptr::write(output.backspaces_chars, edit.delete_chars);
+        ptr::write(output.backspaces_bytes, edit.delete_bytes);
+        ptr::copy_nonoverlapping(bytes.as_ptr(), output.buf, bytes.len());
+    }
+    0
+}
+
 fn with_engine<F, R>(f: F) -> R
 where
     F: FnOnce(&mut Engine) -> R,
@@ -93,7 +160,10 @@ where
 }
 
 /// Initializes the global engine with the default Telex input method.
-#[deprecated(since = "0.5.3", note = "use bamboo_engine_new for an independent engine instance")]
+#[deprecated(
+    since = "0.5.3",
+    note = "use bamboo_engine_new for an independent engine instance; planned removal in 1.0.0"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_setup() {
     let mut guard = match GLOBAL_ENGINE.lock() {
@@ -104,7 +174,10 @@ pub extern "C" fn bamboo_setup() {
 }
 
 /// Resets the global engine state, clearing the current composition.
-#[deprecated(since = "0.5.3", note = "use bamboo_engine_reset for an independent engine instance")]
+#[deprecated(
+    since = "0.5.3",
+    note = "use bamboo_engine_reset for an independent engine instance; planned removal in 1.0.0"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_reset() {
     with_engine(|e| e.reset());
@@ -126,7 +199,7 @@ pub extern "C" fn bamboo_reset() {
 ///     * 8: VNI French Layout
 #[deprecated(
     since = "0.5.3",
-    note = "use bamboo_engine_set_input_method for an independent engine instance"
+    note = "use bamboo_engine_set_input_method for an independent engine instance; planned removal in 1.0.0"
 )]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_set_input_method(method: i32) {
@@ -151,7 +224,7 @@ pub extern "C" fn bamboo_set_input_method(method: i32) {
 /// **Note:** The caller is responsible for freeing the returned string using [`bamboo_free_string`].
 #[deprecated(
     since = "0.5.3",
-    note = "use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf"
+    note = "use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf; planned removal in 1.0.0"
 )]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_process_key(key: u32, is_vietnamese: i32) -> *mut c_char {
@@ -169,12 +242,15 @@ pub extern "C" fn bamboo_process_key(key: u32, is_vietnamese: i32) -> *mut c_cha
 /// Processes a key and writes the delta output (inserted UTF-8 bytes) into a caller-provided buffer.
 ///
 /// # Safety
-/// - `out_buf` must be a valid pointer to a buffer of at least `out_cap` bytes if `out_cap > 0`.
-/// - `out_len`, `backspaces_chars`, and `backspaces_bytes` must be valid, non-null pointers to `usize`.
-/// - The caller must ensure that no other thread is accessing the global engine simultaneously (this function uses a Mutex internally for safety, but pointer validity is the caller's responsibility).
+/// - Output pointers must be valid, writable, mutually non-overlapping, and must
+///   not point into the global engine.
+/// - If `out_cap < BAMBOO_MAX_EDIT_BYTES`, returns `1`, sets `out_len` to the
+///   safe retry capacity, and leaves the engine unchanged.
+/// - Otherwise, `out_buf` must point to `out_cap` writable bytes and not
+///   overlap the output pointers or the global engine.
 #[deprecated(
     since = "0.5.3",
-    note = "use bamboo_engine_process_key_buf for an independent engine instance"
+    note = "use bamboo_engine_process_key_buf for an independent engine instance; planned removal in 1.0.0"
 )]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bamboo_process_key_buf(
@@ -186,16 +262,6 @@ pub unsafe extern "C" fn bamboo_process_key_buf(
     backspaces_chars: *mut usize,
     backspaces_bytes: *mut usize,
 ) -> i32 {
-    if out_len.is_null() || backspaces_chars.is_null() || backspaces_bytes.is_null() {
-        return -1;
-    }
-
-    // SAFETY: pointers were checked non-null and caller guarantees alignment and validity.
-    let (out_len, backspaces_chars, backspaces_bytes) =
-        unsafe { (&mut *out_len, &mut *backspaces_chars, &mut *backspaces_bytes) };
-
-    let mode = if is_vietnamese != 0 { Mode::Vietnamese } else { Mode::English };
-
     let mut guard = match GLOBAL_ENGINE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
@@ -207,35 +273,21 @@ pub unsafe extern "C" fn bamboo_process_key_buf(
         return -1;
     };
 
-    let Some(c) = std::char::from_u32(key) else {
-        *out_len = 0;
-        *backspaces_chars = 0;
-        *backspaces_bytes = 0;
-        return 0;
-    };
-
-    let edit = e.process_key_edit(c, mode);
-    let (bs_chars, bs_bytes, inserted) = (edit.delete_chars, edit.delete_bytes, edit.insert);
-    let bytes = inserted.as_bytes();
-
-    *out_len = bytes.len();
-    *backspaces_chars = bs_chars;
-    *backspaces_bytes = bs_bytes;
-
-    if bytes.len() > out_cap {
-        return 1;
+    // SAFETY: The helper checks null pointers and the caller owns the supplied output buffers.
+    unsafe {
+        process_key_buf(
+            e,
+            key,
+            is_vietnamese,
+            ProcessKeyOutput {
+                buf: out_buf,
+                capacity: out_cap,
+                len: out_len,
+                backspaces_chars,
+                backspaces_bytes,
+            },
+        )
     }
-    if !bytes.is_empty() {
-        if out_buf.is_null() {
-            return -1;
-        }
-        // SAFETY: caller guarantees out_buf points to at least out_cap bytes and bytes.len() <= out_cap.
-        unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
-        }
-    }
-
-    0
 }
 
 /// Returns the current word output as a C-compatible string.
@@ -244,7 +296,10 @@ pub unsafe extern "C" fn bamboo_process_key_buf(
 ///
 /// A pointer to a null-terminated UTF-8 string.
 /// **Note:** The caller is responsible for freeing the returned string using [`bamboo_free_string`].
-#[deprecated(since = "0.5.3", note = "use bamboo_engine_output for an independent engine instance")]
+#[deprecated(
+    since = "0.5.3",
+    note = "use bamboo_engine_output for an independent engine instance; planned removal in 1.0.0"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_output() -> *mut c_char {
     with_engine(|e| {
@@ -256,7 +311,7 @@ pub extern "C" fn bamboo_output() -> *mut c_char {
 /// Removes the last character from the current composition in the global engine.
 #[deprecated(
     since = "0.5.3",
-    note = "use bamboo_engine_undo_last_key with an explicit tone-refresh policy"
+    note = "use bamboo_engine_undo_last_key with an explicit tone-refresh policy; planned removal in 1.0.0"
 )]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_remove_last_char() {
@@ -285,6 +340,20 @@ const fn mode_from_i32(mode: i32) -> Mode {
     if mode == 0 { Mode::English } else { Mode::Vietnamese }
 }
 
+const fn preset_from_method(method: BambooMethod) -> InputMethodPreset {
+    match method {
+        BambooMethod::Telex => InputMethodPreset::Telex,
+        BambooMethod::Vni => InputMethodPreset::Vni,
+        BambooMethod::Viqr => InputMethodPreset::Viqr,
+        BambooMethod::MicrosoftLayout => InputMethodPreset::MicrosoftLayout,
+        BambooMethod::Telex2 => InputMethodPreset::Telex2,
+        BambooMethod::TelexW => InputMethodPreset::TelexW,
+        BambooMethod::TelexVni => InputMethodPreset::TelexVni,
+        BambooMethod::TelexVniViqr => InputMethodPreset::TelexVniViqr,
+        BambooMethod::VniFrenchLayout => InputMethodPreset::VniFrenchLayout,
+    }
+}
+
 const fn tone_refresh_from_i32(policy: i32) -> ToneRefresh {
     if policy == 1 { ToneRefresh::PreserveSnapshot } else { ToneRefresh::Recompute }
 }
@@ -305,8 +374,8 @@ const fn last_word_form_from_i32(form: i32) -> LastWordForm {
 /// **Note:** The caller is responsible for freeing the engine using [`bamboo_engine_free`].
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
-    let im = BambooMethod::from_i32(method).to_input_method();
-    Box::into_raw(Box::new(Engine::new(im)))
+    let preset = preset_from_method(BambooMethod::from_i32(method));
+    Box::into_raw(Box::new(Engine::from_preset(preset)))
 }
 
 /// Creates a new Bamboo Engine instance with configuration flags.
@@ -331,8 +400,8 @@ pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
 /// **Note:** The caller is responsible for freeing the engine using [`bamboo_engine_free`].
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_engine_new_with_flags(method: i32, flags: u32) -> *mut BambooEngine {
-    let im = BambooMethod::from_i32(method).to_input_method();
-    Box::into_raw(Box::new(Engine::with_config(im, Config::from_flags(flags))))
+    let preset = preset_from_method(BambooMethod::from_i32(method));
+    Box::into_raw(Box::new(Engine::from_preset_with_config(preset, Config::from_flags(flags))))
 }
 
 /// Frees a Bamboo Engine instance created with [`bamboo_engine_new`].
@@ -359,7 +428,7 @@ pub unsafe extern "C" fn bamboo_engine_free(engine: *mut BambooEngine) {
 /// - The caller is responsible for freeing the returned string using `bamboo_free_string`.
 #[deprecated(
     since = "0.5.3",
-    note = "use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf"
+    note = "use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf; planned removal in 1.0.0"
 )]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bamboo_engine_process(engine: *mut BambooEngine, key: u32) -> *mut c_char {
@@ -431,6 +500,24 @@ pub unsafe extern "C" fn bamboo_engine_set_config_flags(engine: *mut BambooEngin
     // SAFETY: the caller supplies a live exclusive engine pointer.
     if let Some(e) = unsafe { engine.as_mut() } {
         e.set_config(Config::from_flags(flags));
+    }
+}
+
+/// Controls retention of committed text used by `BAMBOO_OUTPUT_FULL_TEXT`.
+///
+/// Tracking is enabled by default for compatibility. Disabling it clears
+/// retained text and releases its buffers.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer when non-null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_set_full_text_tracking(
+    engine: *mut BambooEngine,
+    enabled: i32,
+) {
+    // SAFETY: The caller supplies a live exclusive engine pointer when non-null.
+    if let Some(e) = unsafe { engine.as_mut() } {
+        e.set_full_text_tracking(enabled != 0);
     }
 }
 
@@ -580,8 +667,12 @@ pub unsafe extern "C" fn bamboo_engine_rebuild_from_text(
 ///
 /// # Safety
 /// - `engine` must be a valid, non-null pointer to a `BambooEngine` instance.
-/// - `out_buf` must be a valid pointer to a buffer of at least `out_cap` bytes if `out_cap > 0`.
-/// - `out_len`, `backspaces_chars`, and `backspaces_bytes` must be valid, non-null pointers to `usize`.
+/// - Output pointers must be valid, writable, mutually non-overlapping, and must
+///   not point into the engine.
+/// - If `out_cap < BAMBOO_MAX_EDIT_BYTES`, returns `1`, sets `out_len` to the
+///   safe retry capacity, and leaves the engine unchanged.
+/// - Otherwise, `out_buf` must point to `out_cap` writable bytes and not
+///   overlap the output pointers or the engine.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bamboo_engine_process_key_buf(
     engine: *mut BambooEngine,
@@ -597,45 +688,21 @@ pub unsafe extern "C" fn bamboo_engine_process_key_buf(
     let Some(e) = (unsafe { engine.as_mut() }) else {
         return -2;
     };
-    if out_len.is_null() || backspaces_chars.is_null() || backspaces_bytes.is_null() {
-        return -1;
+    // SAFETY: The helper checks null pointers and the caller owns the supplied output buffers.
+    unsafe {
+        process_key_buf(
+            e,
+            key,
+            is_vietnamese,
+            ProcessKeyOutput {
+                buf: out_buf,
+                capacity: out_cap,
+                len: out_len,
+                backspaces_chars,
+                backspaces_bytes,
+            },
+        )
     }
-
-    // SAFETY: pointers were verified non-null and caller guarantees proper alignment and lifetime.
-    let (out_len, backspaces_chars, backspaces_bytes) =
-        unsafe { (&mut *out_len, &mut *backspaces_chars, &mut *backspaces_bytes) };
-
-    let mode = if is_vietnamese != 0 { Mode::Vietnamese } else { Mode::English };
-
-    let Some(c) = std::char::from_u32(key) else {
-        *out_len = 0;
-        *backspaces_chars = 0;
-        *backspaces_bytes = 0;
-        return 0;
-    };
-
-    let edit = e.process_key_edit(c, mode);
-    let (bs_chars, bs_bytes, inserted) = (edit.delete_chars, edit.delete_bytes, edit.insert);
-    let bytes = inserted.as_bytes();
-
-    *out_len = bytes.len();
-    *backspaces_chars = bs_chars;
-    *backspaces_bytes = bs_bytes;
-
-    if bytes.len() > out_cap {
-        return 1;
-    }
-    if !bytes.is_empty() {
-        if out_buf.is_null() {
-            return -1;
-        }
-        // SAFETY: caller guarantees out_buf points to at least out_cap bytes and bytes.len() <= out_cap.
-        unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
-        }
-    }
-
-    0
 }
 
 #[cfg(test)]
@@ -740,7 +807,7 @@ mod tests {
         let engine = bamboo_engine_new(0); // Telex
         assert!(!engine.is_null());
 
-        let mut buf = [0u8; 64];
+        let mut buf = [0u8; 128];
         let mut out_len = 0usize;
         let mut bs_chars = 0usize;
         let mut bs_bytes = 0usize;
@@ -776,6 +843,74 @@ mod tests {
                 -2
             );
 
+            bamboo_engine_free(engine);
+        }
+    }
+
+    #[test]
+    fn small_ffi_buffer_can_retry_without_consuming_the_key() {
+        let engine = bamboo_engine_new(0);
+        let mut out_len = 0usize;
+        let mut backspaces_chars = 0usize;
+        let mut backspaces_bytes = 0usize;
+        let mut buffer = [0u8; MAX_EDIT_BYTES];
+
+        // SAFETY: The engine and each output buffer is valid and non-overlapping.
+        unsafe {
+            assert_eq!(
+                bamboo_engine_process_key_buf(
+                    engine,
+                    'a' as u32,
+                    1,
+                    ptr::null_mut(),
+                    0,
+                    &mut out_len,
+                    &mut backspaces_chars,
+                    &mut backspaces_bytes,
+                ),
+                1
+            );
+            assert_eq!(out_len, MAX_EDIT_BYTES);
+            assert_eq!((*engine).output_str(), "");
+
+            assert_eq!(
+                bamboo_engine_process_key_buf(
+                    engine,
+                    'a' as u32,
+                    1,
+                    buffer.as_mut_ptr(),
+                    buffer.len(),
+                    &mut out_len,
+                    &mut backspaces_chars,
+                    &mut backspaces_bytes,
+                ),
+                0
+            );
+            assert_eq!(&buffer[..out_len], b"a");
+            assert_eq!((*engine).output_str(), "a");
+            bamboo_engine_free(engine);
+        }
+    }
+
+    #[test]
+    fn full_text_tracking_can_be_disabled_from_c() {
+        let engine = bamboo_engine_new(0);
+        assert!(!engine.is_null());
+
+        // SAFETY: The engine pointer is valid and exclusively accessed.
+        unsafe {
+            for key in "tieengs ".chars() {
+                let output = bamboo_engine_process_key_mode(engine, key as u32, 1);
+                bamboo_free_string(output);
+            }
+            let output = bamboo_engine_output(engine, OutputOptions::FULL_TEXT.bits());
+            assert_eq!(CStr::from_ptr(output).to_str().unwrap(), "tiếng ");
+            bamboo_free_string(output);
+
+            bamboo_engine_set_full_text_tracking(engine, 0);
+            let output = bamboo_engine_output(engine, OutputOptions::FULL_TEXT.bits());
+            assert_eq!(CStr::from_ptr(output).to_str().unwrap(), "");
+            bamboo_free_string(output);
             bamboo_engine_free(engine);
         }
     }

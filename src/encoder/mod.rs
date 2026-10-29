@@ -403,12 +403,15 @@ pub fn charset_names() -> impl Iterator<Item = &'static str> {
 }
 
 /// Returns a newly allocated list of all supported character set names.
+#[deprecated(since = "0.5.4", note = "use charset_names(); planned removal in 1.0.0")]
 pub fn get_charset_name() -> Vec<String> {
     charset_names().map(String::from).collect()
 }
 
 /// Alias for [`get_charset_name`].
+#[deprecated(since = "0.5.4", note = "use charset_names(); planned removal in 1.0.0")]
 pub fn get_charset_names() -> Vec<String> {
+    #[allow(deprecated)]
     get_charset_name()
 }
 

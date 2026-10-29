@@ -27,6 +27,10 @@ bitflags! {
         /// Handle punctuation marks specifically for IME usage.
         const PUNCTUATION_MODE = 1 << 4;
         /// Reserved for future use.
+        #[deprecated(
+            since = "0.5.4",
+            note = "has no effect; planned removal in 1.0.0"
+        )]
         const IN_REVERSE_ORDER = 1 << 5;
         /// Return raw input keys instead of transformed text.
         const RAW = 1 << 6;

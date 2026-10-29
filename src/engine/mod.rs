@@ -56,6 +56,7 @@ pub struct Engine {
     snapshot_len: usize,
     current_state_id: u32,
     english_bypass: bool,
+    track_committed_text: bool,
     /// True once the DFA refused a new composition (frozen at
     /// [`crate::dfa::DFA_MAX_STATES`]).
     ///
@@ -125,6 +126,7 @@ impl Engine {
         Self {
             committed_text: String::with_capacity(128),
             committed_raw: String::new(),
+            track_committed_text: true,
             cached_output: String::with_capacity(32),
             active_buffer: [Transformation::default(); MAX_ACTIVE_TRANS],
             active_len: 0,
@@ -313,6 +315,22 @@ impl Engine {
         self.scratch_engine = None;
     }
 
+    /// Controls whether committed text is retained for `FULL_TEXT` output.
+    ///
+    /// Tracking is enabled by default for compatibility. Disabling it clears
+    /// retained text and releases its buffers; `FULL_TEXT` then contains only
+    /// the active composition until tracking is enabled again.
+    pub fn set_full_text_tracking(&mut self, enabled: bool) {
+        if self.track_committed_text == enabled {
+            return;
+        }
+        self.track_committed_text = enabled;
+        if !enabled {
+            self.committed_text = String::new();
+            self.committed_raw = String::new();
+        }
+    }
+
     /// Returns a reference to the current input method.
     #[must_use]
     pub fn input_method(&self) -> &InputMethod {
@@ -348,14 +366,14 @@ impl Engine {
         let key = lower_key;
         if key.is_ascii() {
             let (start, end) = self.rules.ascii_rule_indices[key as usize];
-            &self.rules.all_rules[start as usize..end as usize]
+            &self.rules.all_rules[start..end]
         } else {
             self.rules
                 .non_ascii_rule_indices
                 .binary_search_by_key(&key, |(k, _)| *k)
                 .map(|idx| {
                     let (start, end) = self.rules.non_ascii_rule_indices[idx].1;
-                    &self.rules.all_rules[start as usize..end as usize]
+                    &self.rules.all_rules[start..end]
                 })
                 .unwrap_or(&[])
         }
@@ -1054,15 +1072,17 @@ impl Engine {
         if self.active_len == 0 {
             return;
         }
-        crate::flattener::append_flatten_slice(
-            &self.active_buffer[..self.active_len],
-            OutputOptions::NONE,
-            &mut self.committed_text,
-        );
-        crate::flattener::append_raw_keys(
-            &self.active_buffer[..self.active_len],
-            &mut self.committed_raw,
-        );
+        if self.track_committed_text {
+            crate::flattener::append_flatten_slice(
+                &self.active_buffer[..self.active_len],
+                OutputOptions::NONE,
+                &mut self.committed_text,
+            );
+            crate::flattener::append_raw_keys(
+                &self.active_buffer[..self.active_len],
+                &mut self.committed_raw,
+            );
+        }
         self.cached_output.clear();
         self.active_len = 0;
         self.active_upper_mask = 0;
@@ -1586,6 +1606,37 @@ mod tests {
         assert!(matches!(e.output(), Cow::Borrowed(_)));
         assert_eq!(e.output_str(), "");
         assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), "ti\u{1ebf}ng");
+    }
+
+    #[test]
+    fn disabling_full_text_tracking_releases_history_and_keeps_active_output() {
+        let mut e = Engine::new(InputMethod::telex());
+        e.process_str("tieengs ", Mode::Vietnamese);
+        assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), "tiếng ");
+        assert!(e.committed_text_capacity() > 0);
+
+        e.set_full_text_tracking(false);
+        assert_eq!(e.committed_text_len(), 0);
+        assert_eq!(e.committed_text_capacity(), 0);
+
+        e.process_str("nam ", Mode::Vietnamese);
+        assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), "");
+        e.process_key('t', Mode::Vietnamese);
+        assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), "t");
+
+        e.set_full_text_tracking(true);
+        e.process_str("ieengs", Mode::Vietnamese);
+        assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), "tiếng");
+    }
+
+    #[test]
+    fn rebuild_respects_full_text_tracking_setting() {
+        let mut e = Engine::new(InputMethod::telex());
+        e.set_full_text_tracking(false);
+        e.rebuild_from_text("xin tiếng");
+
+        assert_eq!(e.output_str(), "tiếng");
+        assert_eq!(e.get_processed_str(OutputOptions::FULL_TEXT), "tiếng");
     }
 
     #[test]

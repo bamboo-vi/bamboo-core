@@ -19,6 +19,9 @@ extern "C" {
 
 typedef struct BambooEngine BambooEngine;
 
+/* Minimum output buffer size accepted by bamboo_*_process_key_buf. */
+#define BAMBOO_MAX_EDIT_BYTES 128
+
 enum BambooMethod {
     BAMBOO_METHOD_TELEX = 0,
     BAMBOO_METHOD_VNI = 1,
@@ -53,6 +56,7 @@ enum BambooOutputOptions {
     BAMBOO_OUTPUT_LOWER_CASE = 1 << 2,
     BAMBOO_OUTPUT_FULL_TEXT = 1 << 3,
     BAMBOO_OUTPUT_PUNCTUATION_MODE = 1 << 4,
+    /* Deprecated: currently ignored; planned removal in 1.0.0. */
     BAMBOO_OUTPUT_IN_REVERSE_ORDER = 1 << 5,
     BAMBOO_OUTPUT_RAW = 1 << 6,
 };
@@ -67,25 +71,26 @@ enum BambooConfigFlags {
     BAMBOO_CONFIG_BRACKET_EVERYWHERE = 1 << 6,
 };
 
-BAMBOO_DEPRECATED("use BambooEngine instances") void bamboo_setup(void);
-BAMBOO_DEPRECATED("use bamboo_engine_reset") void bamboo_reset(void);
-BAMBOO_DEPRECATED("use bamboo_engine_set_input_method") void bamboo_set_input_method(int32_t method);
-BAMBOO_DEPRECATED("use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf")
+BAMBOO_DEPRECATED("use BambooEngine instances; planned removal in 1.0.0") void bamboo_setup(void);
+BAMBOO_DEPRECATED("use bamboo_engine_reset; planned removal in 1.0.0") void bamboo_reset(void);
+BAMBOO_DEPRECATED("use bamboo_engine_set_input_method; planned removal in 1.0.0") void bamboo_set_input_method(int32_t method);
+BAMBOO_DEPRECATED("use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf; planned removal in 1.0.0")
 char *bamboo_process_key(uint32_t key, int32_t is_vietnamese);
-BAMBOO_DEPRECATED("use bamboo_engine_process_key_buf")
+BAMBOO_DEPRECATED("use bamboo_engine_process_key_buf; planned removal in 1.0.0")
 int32_t bamboo_process_key_buf(uint32_t key, int32_t is_vietnamese,
                                uint8_t *out_buf, size_t out_cap, size_t *out_len,
                                size_t *backspaces_chars, size_t *backspaces_bytes);
-BAMBOO_DEPRECATED("use bamboo_engine_output") char *bamboo_output(void);
-BAMBOO_DEPRECATED("use bamboo_engine_undo_last_key") void bamboo_remove_last_char(void);
+BAMBOO_DEPRECATED("use bamboo_engine_output; planned removal in 1.0.0") char *bamboo_output(void);
+BAMBOO_DEPRECATED("use bamboo_engine_undo_last_key; planned removal in 1.0.0") void bamboo_remove_last_char(void);
 void bamboo_free_string(char *string);
 
 BambooEngine *bamboo_engine_new(int32_t method);
 BambooEngine *bamboo_engine_new_with_flags(int32_t method, uint32_t flags);
 void bamboo_engine_free(BambooEngine *engine);
-BAMBOO_DEPRECATED("use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf")
+BAMBOO_DEPRECATED("use bamboo_engine_process_key_mode or bamboo_engine_process_key_buf; planned removal in 1.0.0")
 char *bamboo_engine_process(BambooEngine *engine, uint32_t key);
 char *bamboo_engine_process_key_mode(BambooEngine *engine, uint32_t key, int32_t mode);
+/* Returns 1 without consuming the key when out_cap < BAMBOO_MAX_EDIT_BYTES. */
 int32_t bamboo_engine_process_key_buf(BambooEngine *engine, uint32_t key,
                                       int32_t is_vietnamese, uint8_t *out_buf,
                                       size_t out_cap, size_t *out_len,
@@ -93,6 +98,7 @@ int32_t bamboo_engine_process_key_buf(BambooEngine *engine, uint32_t key,
 void bamboo_engine_reset(BambooEngine *engine);
 void bamboo_engine_commit(BambooEngine *engine);
 void bamboo_engine_set_config_flags(BambooEngine *engine, uint32_t flags);
+void bamboo_engine_set_full_text_tracking(BambooEngine *engine, int32_t enabled);
 uint32_t bamboo_engine_config_flags(const BambooEngine *engine);
 void bamboo_engine_set_input_method(BambooEngine *engine, int32_t method);
 char *bamboo_engine_output(const BambooEngine *engine, uint32_t options);
