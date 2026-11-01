@@ -967,9 +967,30 @@ impl Engine {
             work.as_slice().iter().any(|t| t.has_target() || (t.key != '\0' && t.result != t.key));
 
         if has_transforms && !self.is_valid_internal(work.as_slice(), false) {
-            let raw_comp = crate::syllable::break_composition_slice(work.as_slice());
-            let raw_len =
-                work.as_slice().iter().filter(|t| t.key != '\0').count().min(MAX_ACTIVE_TRANS);
+            // A key whose mark or tone was undone ("tooo" -> "too") is not
+            // typed again: "toool" restores to "tool", not "toool".
+            let comp = work.as_slice();
+            let undone = |i: usize| {
+                let t = &comp[i];
+                t.key != '\0'
+                    && t.effect_type != EffectType::Appending
+                    && t.has_target()
+                    && comp[i + 1..].iter().any(|u| {
+                        u.key == '\0'
+                            && u.effect_type == t.effect_type
+                            && u.target() == t.target()
+                            && (u.effect == 0 || u.effect == Mark::Raw as u8)
+                    })
+            };
+            let mut raw_comp = [Transformation::default(); MAX_ACTIVE_TRANS];
+            let mut raw_len = 0;
+            for (i, t) in comp.iter().enumerate() {
+                if t.key != '\0' && !undone(i) && raw_len < MAX_ACTIVE_TRANS {
+                    raw_comp[raw_len] =
+                        crate::syllable::new_appending_trans(t.key, t.is_upper_case);
+                    raw_len += 1;
+                }
+            }
             work.clear();
             work.extend_from_slice(&raw_comp[..raw_len]);
             self.english_bypass = true;

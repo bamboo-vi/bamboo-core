@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Auto-correct no longer types an undo key twice when it restores a word to its keys: Telex
+  "toool" ("tô", undone to "too", then "l") now gives "tool" instead of "toool".
+
 ## [0.5.3] - 2026-10-23
 
 ### Added
