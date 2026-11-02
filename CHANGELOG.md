@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Auto-correct no longer restores consonant abbreviations containing `đ` to their keys:
+  Telex `ddc` gives `đc` (and `vcdd` gives `vcđ`) instead of `ddc`. The onset lookup rejected
+  the cluster before the abbreviation rule was reached.
+
 ## [0.5.3] - 2026-10-23
 
 ### Added

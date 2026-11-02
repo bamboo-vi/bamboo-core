@@ -82,6 +82,12 @@ pub fn is_valid_cvc(fc: &str, vo: &str, lc: &str, full: bool) -> bool {
 
 /// Low-level variant of [`is_valid_cvc`] that works directly with character slices.
 pub fn is_valid_cvc_chars(fc: &[char], vo: &[char], lc: &[char], full: bool) -> bool {
+    // Consonant abbreviations containing 'đ' (e.g., "đc", "vcđ", "cđ", "bcđ", "nđm").
+    // Checked before the onset lookup, which rejects clusters like "đc" or "vcđ".
+    if vo.is_empty() && fc.iter().chain(lc).any(|&c| matches!(c, 'đ' | 'Đ')) {
+        return true;
+    }
+
     let fc_mask = if !fc.is_empty() {
         let m = lookup_mask_optimized(FC_PACKED_ROWS, fc, full || !vo.is_empty(), true);
         if m == 0 {
@@ -113,15 +119,7 @@ pub fn is_valid_cvc_chars(fc: &[char], vo: &[char], lc: &[char], full: bool) -> 
     };
 
     if vo_mask == 0 {
-        if fc_mask != 0 {
-            return true;
-        }
-        // Consonant abbreviations containing 'đ' (e.g., "đc", "vcđ", "cđ", "bcđ", "nđm", "ađ")
-        if fc.iter().any(|&c| matches!(c, 'đ' | 'Đ')) || lc.iter().any(|&c| matches!(c, 'đ' | 'Đ'))
-        {
-            return true;
-        }
-        return false;
+        return fc_mask != 0;
     }
 
     if fc_mask != 0 && !is_valid_cv(fc_mask, vo_mask) {
