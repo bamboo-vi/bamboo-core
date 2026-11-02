@@ -7,8 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Auto-correct no longer restores consonant abbreviations containing `đ` to their keys:
-  Telex `ddc` gives `đc` (and `vcdd` gives `vcđ`) instead of `ddc`. The onset lookup rejected
-  the cluster before the abbreviation rule was reached.
+  Telex `ddc` gives `đc` (and `vcdd` gives `vcđ`) instead of `ddc`. The spelling check is
+  unchanged: such abbreviations are still not valid Vietnamese words.
 
 ## [0.5.3] - 2026-10-23
 

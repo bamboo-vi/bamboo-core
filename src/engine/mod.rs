@@ -967,6 +967,16 @@ impl Engine {
             work.as_slice().iter().any(|t| t.has_target() || (t.key != '\0' && t.result != t.key));
 
         if has_transforms && !self.is_valid_internal(work.as_slice(), false) {
+            // Consonant abbreviations with 'đ' ("đc", "vcđ", "cđ") are not
+            // Vietnamese spelling, but they are not mistyped words either:
+            // with no vowel there is nothing to give back. Only reached for
+            // invalid words, so the spelling check itself is unchanged.
+            let text = crate::flattener::flatten_slice(work.as_slice(), OutputOptions::NONE);
+            if text.chars().any(|c| matches!(c, 'đ' | 'Đ'))
+                && !text.chars().any(crate::phonetics::is_vowel)
+            {
+                return;
+            }
             let raw_comp = crate::syllable::break_composition_slice(work.as_slice());
             let raw_len =
                 work.as_slice().iter().filter(|t| t.key != '\0').count().min(MAX_ACTIVE_TRANS);
