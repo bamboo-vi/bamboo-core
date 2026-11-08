@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Performance
+
+- Word breaks now commit the active word and append the break character directly instead of
+  committing a one-character composition, halving commits and DFA lookups per space/punctuation.
+- `process_key_edit` no longer counts common-prefix characters it discards, and rule-engine
+  scratch compositions use `TransformationStack` instead of zero-filling 512-byte arrays.
+- `encode_charset` allocates lazily in one pass for non-VIQR charsets, and preset-backed engines
+  are created without cloning the full input-method rule table.
+
 ## [0.5.3] - 2026-10-23
 
 ### Added

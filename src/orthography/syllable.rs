@@ -688,17 +688,16 @@ fn pull_effects_back(composition: &[Transformation], mut start: usize) -> usize 
 
 /// `is_valid` on `composition[start..end]`, ignoring effects on letters before `start`.
 fn is_valid_from(composition: &[Transformation], start: usize, end: usize) -> bool {
-    let mut part = [Transformation::default(); MAX_ACTIVE_TRANS];
-    let len = end - start;
-    part[..len].copy_from_slice(&composition[start..end]);
-    for t in &mut part[..len] {
+    let mut part = TransformationStack::new();
+    part.extend_from_slice(&composition[start..end]);
+    for t in part.as_mut_slice() {
         if let Some(target) = t.target() {
             let outside = (target as usize) < start;
             // Out of range, so it matches no letter, like Go's pointer that is in no list.
             t.set_target(Some(if outside { MAX_ACTIVE_TRANS as u8 } else { target - start as u8 }));
         }
     }
-    is_valid(&part[..len], false)
+    is_valid(part.as_slice(), false)
 }
 
 fn is_effective(composition: &[Transformation], target_idx: usize, new_rule: &Rule) -> bool {
@@ -760,7 +759,6 @@ fn find_mark_target_excluding(
     rules: &[Rule],
     exclude_target: Option<u8>,
 ) -> (Option<u8>, Option<Rule>) {
-    let mut tmp = [Transformation::default(); MAX_ACTIVE_TRANS];
     for (idx, trans) in composition.iter().enumerate().rev() {
         for rule in rules {
             if rule.effect_type != EffectType::MarkTransformation || rule.effect == 0 {
@@ -777,15 +775,14 @@ fn find_mark_target_excluding(
                 continue;
             }
 
-            let base_len = composition.len();
-            if base_len >= MAX_ACTIVE_TRANS {
+            if composition.len() >= MAX_ACTIVE_TRANS {
                 continue;
             }
-            let tmp_len = base_len + 1;
-            tmp[..base_len].copy_from_slice(composition);
-            tmp[base_len] = Transformation::from_rule(*rule, Some(target), false);
+            let mut tmp = TransformationStack::new();
+            tmp.extend_from_slice(composition);
+            tmp.push(Transformation::from_rule(*rule, Some(target), false));
 
-            if rule.get_mark() == Mark::Dash || is_valid(&tmp[..tmp_len], false) {
+            if rule.get_mark() == Mark::Dash || is_valid(tmp.as_slice(), false) {
                 return (Some(target), Some(*rule));
             }
         }
@@ -1072,21 +1069,20 @@ pub(crate) fn generate_transformations(
             return;
         }
 
-        let mut new_comp = [Transformation::default(); MAX_ACTIVE_TRANS];
+        let mut new_comp = TransformationStack::new();
         let base_len = composition.len();
         // Only attempt the validity check if there is room for one more transformation.
         if base_len < MAX_ACTIVE_TRANS {
-            let new_len = base_len + 1;
-            new_comp[..base_len].copy_from_slice(composition);
-            new_comp[base_len] = out.as_slice()[0];
+            new_comp.extend_from_slice(composition);
+            new_comp.push(out.as_slice()[0]);
 
             // Only spread the mark when the syllable is incomplete without it:
             // "khuơ" stays as typed, while "huơu" needs the second horn.
             // `new_comp` is a new revision, so it gets its own split.
-            if !is_valid(&new_comp[..new_len], true)
+            if !is_valid(new_comp.as_slice(), true)
                 && let (Some(target2), Some(mut virtual_rule)) = {
-                    let new_cvc = extract_cvc_trans(&new_comp[..new_len]);
-                    find_target(&new_comp[..new_len], applicable_rules, config, &new_cvc)
+                    let new_cvc = extract_cvc_trans(new_comp.as_slice());
+                    find_target(new_comp.as_slice(), applicable_rules, config, &new_cvc)
                 }
             {
                 virtual_rule.key = '\0';
@@ -1110,18 +1106,17 @@ pub(crate) fn generate_transformations(
                     false,
                 );
 
-                let mut tmp = [Transformation::default(); MAX_ACTIVE_TRANS];
+                let mut tmp = TransformationStack::new();
                 let base_len = composition.len();
                 // Only attempt if there is room for one more transformation.
                 if base_len < MAX_ACTIVE_TRANS {
-                    let tmp_len = base_len + 1;
-                    tmp[..base_len].copy_from_slice(composition);
-                    tmp[base_len] = trans;
+                    tmp.extend_from_slice(composition);
+                    tmp.push(trans);
 
                     // `tmp` is a new revision, so it gets its own split.
                     if let (Some(target), Some(applicable_rule)) = {
-                        let tmp_cvc = extract_cvc_trans(&tmp[..tmp_len]);
-                        find_target(&tmp[..tmp_len], applicable_rules, config, &tmp_cvc)
+                        let tmp_cvc = extract_cvc_trans(tmp.as_slice());
+                        find_target(tmp.as_slice(), applicable_rules, config, &tmp_cvc)
                     } && target_idx != target
                     {
                         out.push(trans);

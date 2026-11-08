@@ -75,6 +75,11 @@ name = "criterion_bench"
 harness = false
 test = false
 
+[[bench]]
+name = "four_engine_scale"
+harness = false
+test = false
+
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
 proptest = "1.12.0"

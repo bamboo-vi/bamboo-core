@@ -505,14 +505,14 @@ impl Engine {
         if combined_len > MAX_ACTIVE_TRANS || self.input_method.super_keys.is_empty() {
             return;
         }
-        let mut tmp_data = [Transformation::default(); MAX_ACTIVE_TRANS];
-        tmp_data[..composition.len()].copy_from_slice(composition.as_slice());
-        tmp_data[composition.len()..combined_len].copy_from_slice(trans_buf.as_slice());
+        let mut tmp_data = TransformationStack::new();
+        tmp_data.extend_from_slice(composition.as_slice());
+        tmp_data.extend_from_slice(trans_buf.as_slice());
 
-        if crate::syllable::uho_tail_match_composition(&tmp_data[..combined_len]) {
-            let tmp_cvc = crate::syllable::extract_cvc_trans(&tmp_data[..combined_len]);
+        if crate::syllable::uho_tail_match_composition(tmp_data.as_slice()) {
+            let tmp_cvc = crate::syllable::extract_cvc_trans(tmp_data.as_slice());
             let (target, rule) = crate::syllable::find_target(
-                &tmp_data[..combined_len],
+                tmp_data.as_slice(),
                 self.get_applicable_rules(lower(self.input_method.super_keys[0])),
                 self.config,
                 &tmp_cvc,
@@ -595,7 +595,7 @@ impl Engine {
         self
     }
 
-    fn lcp_chars_and_bytes(a: &str, b: &str) -> (usize, usize) {
+    fn lcp_bytes(a: &str, b: &str) -> usize {
         let a_bytes = a.as_bytes();
         let b_bytes = b.as_bytes();
         let min_len = a_bytes.len().min(b_bytes.len());
@@ -633,13 +633,7 @@ impl Engine {
             lcp_bytes -= 1;
         }
 
-        let prefix = &a[..lcp_bytes];
-        let lcp_chars = if prefix.is_ascii() {
-            lcp_bytes
-        } else {
-            prefix.as_bytes().iter().filter(|&&b| (b & 0xC0) != 0x80).count()
-        };
-        (lcp_chars, lcp_bytes)
+        lcp_bytes
     }
 
     /// Processes a single key and returns a **3-way diff** for efficient text editor updates.
@@ -685,8 +679,7 @@ impl Engine {
     pub fn process_key_edit(&mut self, key: char, mode: Mode) -> EditDelta<'_> {
         self.process_key(key, mode);
 
-        let (_prefix_len, lcp_bytes) =
-            Self::lcp_chars_and_bytes(&self.prev_preedit, &self.cached_output);
+        let lcp_bytes = Self::lcp_bytes(&self.prev_preedit, &self.cached_output);
 
         let prev_bytes = self.prev_preedit.len();
 
@@ -861,8 +854,10 @@ impl Engine {
         // raw output and backspace must still reach them.
         let ends_word = crate::phonetics::is_word_break_symbol(lower_key)
             && !self.is_input_method_key(lower_key);
-        if ends_word && self.active_len > 0 {
-            self.commit();
+        if ends_word {
+            let cased = if is_upper_case { upper(lower_key) } else { lower_key };
+            self.commit_word_break(cased);
+            return;
         }
         if self.active_len >= MAX_ACTIVE_TRANS {
             self.commit();
@@ -876,13 +871,9 @@ impl Engine {
         self.active_buffer[self.active_len] =
             crate::syllable::new_appending_trans(lower_key, is_upper_case);
         self.active_len += 1;
-        if ends_word {
-            self.commit();
-        } else {
-            // Pure append: the preedit grows by exactly one cased char.
-            // Any `commit()` above already cleared `cached_output`.
-            self.cached_output.push(if is_upper_case { upper(lower_key) } else { lower_key });
-        }
+        // Pure append: the preedit grows by exactly one cased char.
+        // Any `commit()` above already cleared `cached_output`.
+        self.cached_output.push(if is_upper_case { upper(lower_key) } else { lower_key });
         self.current_state_id = 0;
     }
 
@@ -939,11 +930,31 @@ impl Engine {
         true
     }
 
+    /// Commits the active word, then appends a word-break character straight
+    /// to the committed buffers. A break char flattens to itself, so this
+    /// skips the second `commit()` (flatten + DFA lookup) paid by the generic
+    /// one-char-active path.
+    fn commit_word_break(&mut self, cased: char) {
+        self.commit();
+        // `commit` early-returns on an empty word; reset the same state anyway
+        // so a break at a word start behaves like committing a one-char word.
+        self.cached_output.clear();
+        self.snapshot_len = 0;
+        self.active_upper_mask = 0;
+        self.english_bypass = false;
+        self.dfa_detached = false;
+        self.current_state_id = 0;
+        self.committed_text.push(cased);
+        self.committed_raw.push(cased);
+    }
+
     /// Non-processable key on the slow path: snapshots, appends raw, and
     /// commits on word breaks.
     fn handle_word_break_key(&mut self, lower_key: char, is_upper_case: bool) {
         if crate::phonetics::is_word_break_symbol(lower_key) {
-            self.commit();
+            let cased = if is_upper_case { upper(lower_key) } else { lower_key };
+            self.commit_word_break(cased);
+            return;
         }
         // Snapshot before push_active so backspace can restore previous state.
         // Word breaks trigger commit() which clears snapshots — that's correct
@@ -951,9 +962,6 @@ impl Engine {
         self.push_snapshot();
         let trans = crate::syllable::new_appending_trans(lower_key, is_upper_case);
         self.push_active(trans);
-        if crate::phonetics::is_word_break_symbol(lower_key) {
-            self.commit();
-        }
         self.current_state_id = 0;
     }
 

@@ -15,7 +15,7 @@ use std::sync::Mutex;
 
 use crate::config::Config;
 use crate::engine::{Engine, LastWordForm, ToneRefresh};
-use crate::input_method::InputMethod;
+use crate::input_method::{InputMethod, InputMethodPreset};
 use crate::mode::{Mode, OutputOptions};
 
 /// C-compatible enum representing supported Vietnamese input methods for FFI.
@@ -59,19 +59,24 @@ impl BambooMethod {
         }
     }
 
+    /// Converts the enum variant to its corresponding preset.
+    const fn preset(self) -> InputMethodPreset {
+        match self {
+            Self::Telex => InputMethodPreset::Telex,
+            Self::Vni => InputMethodPreset::Vni,
+            Self::Viqr => InputMethodPreset::Viqr,
+            Self::MicrosoftLayout => InputMethodPreset::MicrosoftLayout,
+            Self::Telex2 => InputMethodPreset::Telex2,
+            Self::TelexW => InputMethodPreset::TelexW,
+            Self::TelexVni => InputMethodPreset::TelexVni,
+            Self::TelexVniViqr => InputMethodPreset::TelexVniViqr,
+            Self::VniFrenchLayout => InputMethodPreset::VniFrenchLayout,
+        }
+    }
+
     /// Converts the enum variant to its corresponding [`InputMethod`].
     pub fn to_input_method(self) -> InputMethod {
-        match self {
-            Self::Telex => InputMethod::telex(),
-            Self::Vni => InputMethod::vni(),
-            Self::Viqr => InputMethod::viqr(),
-            Self::MicrosoftLayout => InputMethod::microsoft_layout(),
-            Self::Telex2 => InputMethod::telex_2(),
-            Self::TelexW => InputMethod::telex_w(),
-            Self::TelexVni => InputMethod::telex_vni(),
-            Self::TelexVniViqr => InputMethod::telex_vni_viqr(),
-            Self::VniFrenchLayout => InputMethod::vni_french_layout(),
-        }
+        self.preset().to_input_method()
     }
 }
 
@@ -87,7 +92,7 @@ where
         Err(poisoned) => poisoned.into_inner(),
     };
     if guard.is_none() {
-        *guard = Some(Engine::new(InputMethod::telex()));
+        *guard = Some(Engine::from_preset(InputMethodPreset::Telex));
     }
     if let Some(engine) = guard.as_mut() { f(engine) } else { R::default() }
 }
@@ -100,7 +105,7 @@ pub extern "C" fn bamboo_setup() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    *guard = Some(Engine::new(InputMethod::telex()));
+    *guard = Some(Engine::from_preset(InputMethodPreset::Telex));
 }
 
 /// Resets the global engine state, clearing the current composition.
@@ -130,12 +135,12 @@ pub extern "C" fn bamboo_reset() {
 )]
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_set_input_method(method: i32) {
-    let im = BambooMethod::from_i32(method).to_input_method();
+    let preset = BambooMethod::from_i32(method).preset();
     let mut guard = match GLOBAL_ENGINE.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    *guard = Some(Engine::new(im));
+    *guard = Some(Engine::from_preset(preset));
 }
 
 /// Processes a key and returns the full current word as a C-compatible string.
@@ -201,7 +206,7 @@ pub unsafe extern "C" fn bamboo_process_key_buf(
         Err(poisoned) => poisoned.into_inner(),
     };
     if guard.is_none() {
-        *guard = Some(Engine::new(InputMethod::telex()));
+        *guard = Some(Engine::from_preset(InputMethodPreset::Telex));
     }
     let Some(e) = guard.as_mut() else {
         return -1;
@@ -305,8 +310,8 @@ const fn last_word_form_from_i32(form: i32) -> LastWordForm {
 /// **Note:** The caller is responsible for freeing the engine using [`bamboo_engine_free`].
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
-    let im = BambooMethod::from_i32(method).to_input_method();
-    Box::into_raw(Box::new(Engine::new(im)))
+    let preset = BambooMethod::from_i32(method).preset();
+    Box::into_raw(Box::new(Engine::from_preset(preset)))
 }
 
 /// Creates a new Bamboo Engine instance with configuration flags.
@@ -331,8 +336,8 @@ pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
 /// **Note:** The caller is responsible for freeing the engine using [`bamboo_engine_free`].
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_engine_new_with_flags(method: i32, flags: u32) -> *mut BambooEngine {
-    let im = BambooMethod::from_i32(method).to_input_method();
-    Box::into_raw(Box::new(Engine::with_config(im, Config::from_flags(flags))))
+    let preset = BambooMethod::from_i32(method).preset();
+    Box::into_raw(Box::new(Engine::from_preset_with_config(preset, Config::from_flags(flags))))
 }
 
 /// Frees a Bamboo Engine instance created with [`bamboo_engine_new`].
@@ -454,7 +459,7 @@ pub unsafe extern "C" fn bamboo_engine_set_input_method(engine: *mut BambooEngin
     // SAFETY: the caller supplies a live exclusive engine pointer.
     if let Some(e) = unsafe { engine.as_mut() } {
         let config = e.config();
-        *e = Engine::with_config(BambooMethod::from_i32(method).to_input_method(), config);
+        *e = Engine::from_preset_with_config(BambooMethod::from_i32(method).preset(), config);
     }
 }
 
