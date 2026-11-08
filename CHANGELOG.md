@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-11-08
+
+### Added
+
+- Added optional full-text history tracking controls to the Rust engine and C API. Tracking remains
+  enabled by default; disabling it releases retained committed-text buffers.
+
+### Changed
+
+- Deprecated `get_charset_name` and `get_charset_names` in favor of `charset_names`.
+
+### Fixed
+
+- Hardened FFI pointer and output-buffer validation. A too-small `bamboo_engine_process_key_buf`
+  buffer now reports a safe retry capacity without consuming the key.
+- Full-text tracking disabled mode no longer retains word-break characters.
+
 ### Performance
 
 - Word breaks now commit the active word and append the break character directly instead of
@@ -12,6 +29,11 @@ All notable changes to this project will be documented in this file.
   scratch compositions use `TransformationStack` instead of zero-filling 512-byte arrays.
 - `encode_charset` allocates lazily in one pass for non-VIQR charsets, and preset-backed engines
   are created without cloning the full input-method rule table.
+
+### Testing
+
+- Added scale benchmarks for cold start, incremental and batch paragraphs, and million-character
+  sessions across Bamboo Core and three comparison engines.
 
 ## [0.5.3] - 2026-10-23
 

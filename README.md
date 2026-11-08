@@ -22,7 +22,7 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 
 ```toml
 [dependencies]
-bamboo-core = "0.5.3"
+bamboo-core = "0.5.4"
 ```
 
 ### Legacy Charset Conversion (0.5.1)
@@ -71,7 +71,7 @@ remain unchanged because they express ordinary enabled/disabled state.
 
 ## C and C++ integration
 
-Version 0.5.3 ships `include/bamboo_core.h` and builds both `libbamboo_core.a` and
+The crate ships `include/bamboo_core.h` and builds both `libbamboo_core.a` and
 `libbamboo_core.so`. Use a `BambooEngine` per input context; it owns only composition state.
 The host application remains responsible for preedit presentation, committing text, key-event
 routing, dictionaries, macros, and platform integration.
