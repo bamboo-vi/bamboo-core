@@ -329,6 +329,7 @@ fn rapid_tone_reassignment_no_dropped_chars() {
 }
 
 #[test]
+#[ignore = "speed depends on the machine; run with --ignored"]
 fn stress_typing_throughput() {
     use std::time::Instant;
 
