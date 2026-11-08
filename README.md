@@ -227,25 +227,25 @@ assert_eq!(engine.get_processed_str(OutputOptions::FULL_TEXT), "Trăng");
 
 ## Performance & Benchmarks
 
-Bamboo Core is architected for zero heap allocations in the interactive typing loop, sub-microsecond keystroke latency, and high CPU cache efficiency via L1 cache line packing and SWAR vector matching. On current `main` the `Engine` footprint is 1096 B (hot-first field layout, 32-transformation window, no persisted scratch stacks, lazy DFA arenas, 8-byte snapshots), with an L1-resident working set well under 4 KB per keystroke; DFA states are 64 B single-cache-line (popcount-rank transitions, no key array).
+Bamboo Core is architected for zero heap allocations in the interactive typing loop, sub-microsecond keystroke latency, and high CPU cache efficiency via L1 cache line packing and SWAR vector matching. In `v0.5.4`, the `Engine` footprint is 1096 B (hot-first field layout, 32-transformation window, no persisted scratch stacks, lazy DFA arenas, 8-byte snapshots), with an L1-resident working set well under 4 KB per keystroke; DFA states are 64 B single-cache-line (popcount-rank transitions, no key array).
 
-| Benchmark Scenario | `v0.4.0` | `v0.4.1` | Delta |
-|---|---|---|---|
-| Feed single word (`tieengs`) | 313.2 ns/op | **278.6 ns/op** | **-11.0%** |
-| Feed no warmup (DFA miss) | 6.235 µs/op | **6.001 µs/op** | **-3.7%** |
-| Feed + delta (per key) | 400.3 ns/op | **343.1 ns/op** | **-14.3%** |
-| Backspace (`tieengs`) | 350.5 ns/op | **300.9 ns/op** | **-14.2%** |
-| Backspace x3 | 389.6 ns/op | **345.4 ns/op** | **-11.3%** |
-| Mixed typing (29 chars) | 1.467 µs/op | **1.248 µs/op** | **-14.9%** |
-| Many words (13 words + spaces) | 9.504 µs/op | **9.472 µs/op** | **-0.3%** |
-| English passthrough (code) | 320.2 ns/op | **186.3 ns/op** | **-41.8%** |
-| Long identifier (39 chars) | 791.4 ns/op | **349.2 ns/op** | **-55.9%** |
-| Backspace spam (7x) | 445.5 ns/op | **392.9 ns/op** | **-11.8%** |
-| Commit via space | 308.5 ns/op | **284.8 ns/op** | **-7.7%** |
-| Worst-case syllable (`nghieengs`) | 260.8 ns/op | **233.4 ns/op** | **-10.5%** |
-| Random typing (real workload) | 5.578 µs/op | **5.162 µs/op** | **-7.5%** |
+| Benchmark Scenario | Bamboo Core `0.5.4` | Uvie `2.8.1` | Bamboo/Uvie |
+|---|---:|---:|---:|
+| Feed single word (`tieengs`) | 199.8 ns | 776.4 ns | 0.26× |
+| Feed no warmup (DFA miss) | 6.044 µs | 1.013 µs | 5.97× |
+| Feed + delta (`tieengs`) | 263.8 ns | 807.1 ns | 0.33× |
+| Backspace (`tieengs`) | 218.6 ns | 997.8 ns | 0.22× |
+| Backspace x3 | 245.5 ns | 1.389 µs | 0.18× |
+| Mixed typing (32 chars) | 977.3 ns | 3.413 µs | 0.29× |
+| Many words (13 words + spaces) | 2.445 µs | 10.305 µs | 0.24× |
+| English passthrough (code) | 144.3 ns | 1.311 µs | 0.11× |
+| Long identifier (39 chars) | 334.0 ns | 11.279 µs | 0.03× |
+| Backspace spam (7x) | 287.1 ns | 1.584 µs | 0.18× |
+| Commit via space | 211.2 ns | 502.6 ns | 0.42× |
+| Worst-case syllable (`nghieeng`) | 121.3 ns | 664.3 ns | 0.18× |
+| Random typing (real workload) | 4.432 µs | 8.105 µs | 0.55× |
 
-*Benchmarks from `benches/engine_bench.rs`, medians of 3 runs of 500k iterations, x86_64 Linux, Rust 1.88+ release profile with Fat LTO.*
+*Benchmarks from `benches/engine_bench.rs`, medians of 3 runs of 500,000 iterations each, on x86_64 Linux with an AMD Ryzen 7 H 255 and Rust 1.98.0, using the Fat LTO bench profile. Ratios are Bamboo Core time divided by Uvie time; lower than 1 means Bamboo Core is faster. Each `op` is one full workload iteration, not one keystroke.*
 
 > **Note for developers:** bench binaries run a fast smoke under `cargo test --all-targets`; the full suites (including multi-minute EXTREME memory profiles) run only under `cargo bench`. Per-keystroke polling loops should prefer `get_processed_str_cow` over `get_processed_str` to borrow cached output instead of allocating.
 
