@@ -184,7 +184,7 @@ pub mod wasm;
 /// Available when the `parallel` feature is enabled.
 #[cfg(feature = "parallel")]
 pub mod parallel {
-    use crate::{Engine, InputMethod, Mode};
+    use crate::{Config, Engine, InputMethod, Mode};
     use rayon::prelude::*;
 
     /// Processes multiple input strings in parallel using Rayon work-stealing.
@@ -209,7 +209,14 @@ pub mod parallel {
         inputs
             .par_iter()
             .map_init(
-                || Engine::new(input_method.clone()),
+                || {
+                    if let Some((im, rules)) = crate::input_method::find_preset_shared(input_method)
+                    {
+                        Engine::with_shared_rules(im, rules, Config::default())
+                    } else {
+                        Engine::new(input_method.clone())
+                    }
+                },
                 |engine, s| {
                     engine.reset();
                     engine.process(s.as_ref(), mode)
@@ -244,6 +251,7 @@ pub mod advanced {
         CharsetDefinition, get_charset_definition, get_charset_definitions,
     };
     pub use crate::dfa::{DFA_MAX_STATES, Dfa, State};
+    #[allow(deprecated)]
     pub use crate::encoder::{
         Charset, charset_names, decode_charset, encode, encode_charset, get_charset_name,
         get_charset_names,

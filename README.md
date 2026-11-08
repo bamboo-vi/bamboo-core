@@ -88,7 +88,11 @@ bamboo_engine_free(engine);
 ```
 
 For a normal keystroke loop, prefer `bamboo_engine_process_key_buf`: it returns the insert text
-and deletion counts in caller-owned storage without allocating. The process-wide `bamboo_*`
+and deletion counts in caller-owned storage without allocating. Provide at least
+`BAMBOO_MAX_EDIT_BYTES` bytes; a smaller buffer returns `1` without consuming the key, so the
+caller can retry safely with a larger buffer. Committed text is retained for `FULL_TEXT` output by
+default; call `bamboo_engine_set_full_text_tracking(engine, 0)` to release that history when it is
+not needed. The process-wide `bamboo_*`
 entrypoints and `bamboo_engine_process` are deprecated; compilers that support deprecation
 attributes warn when the C header is used.
 
