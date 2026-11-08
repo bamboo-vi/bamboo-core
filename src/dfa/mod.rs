@@ -153,7 +153,7 @@ impl State {
 ///
 /// Stores all unique composition states and provides fast $O(1)$ lookups
 /// without heap allocation during state transitions.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Dfa {
     /// Array of all DFA states. State 0 is always the initial (empty) state.
     pub states: Vec<State>,
@@ -166,18 +166,6 @@ pub struct Dfa {
     pub flat_arena: Vec<u8>,
     /// Maps composition hash to `state_id` for $O(1)$ deduplication and lookup.
     pub hash_to_state: FxHashMap<u64, u32>,
-}
-
-impl Clone for Dfa {
-    fn clone(&self) -> Self {
-        Self {
-            states: self.states.clone(),
-            comp_hashes: self.comp_hashes.clone(),
-            arena: self.arena.clone(),
-            flat_arena: self.flat_arena.clone(),
-            hash_to_state: self.hash_to_state.clone(),
-        }
-    }
 }
 
 impl Default for Dfa {

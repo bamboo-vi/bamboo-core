@@ -9,8 +9,11 @@
 
 #![allow(deprecated, unused)]
 use bamboo_core::{Engine, InputMethod, Mode, OutputOptions};
+use skey_engine::{Method, SkeyEngine};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use uvie::UltraFastViEngine;
+use vi::methods::transform_buffer;
 
 // ---------------------------------------------------------------------------
 // Custom allocator to track total allocated bytes
@@ -63,6 +66,88 @@ fn format_bytes(b: usize) -> String {
     } else {
         format!("{:.1} MB", b as f64 / (1024.0 * 1024.0))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Four-engine helpers
+// ---------------------------------------------------------------------------
+
+fn measure_four(label: &str, engine: &str, f: impl FnOnce() -> String) {
+    reset_counters();
+    let before = snapshot();
+    let out = f();
+    let after = snapshot();
+    let bytes = (after.0 as isize - before.0 as isize).max(0) as usize;
+    let net = ((after.0 as isize - after.1 as isize) - (before.0 as isize - before.1 as isize))
+        .max(0) as usize;
+    let allocs = after.2 - before.2;
+    println!(
+        "{:<20} {:<8} {:>12} {:>10} {:>12} {:>12}",
+        label,
+        engine,
+        format_bytes(bytes),
+        allocs,
+        format_bytes(net),
+        format_bytes(out.len())
+    );
+}
+
+fn skey_text(skey: &SkeyEngine, text: &str) -> String {
+    let mut out = String::new();
+    for (i, word) in text.split(' ').enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        out.push_str(&skey.transform(word));
+    }
+    out
+}
+
+fn vi_text(text: &str) -> String {
+    let mut out = String::new();
+    for (i, word) in text.split(' ').enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        transform_buffer(&vi::TELEX, word.chars(), &mut out);
+    }
+    out
+}
+
+/// uvie's committed buffer is a fixed `StackStr<128>`, so flush per word.
+fn uvie_word(engine: &mut UltraFastViEngine, word: &str, out: &mut String) {
+    for ch in word.chars() {
+        engine.feed(ch);
+    }
+    engine.feed(' ');
+    out.push_str(engine.committed_text());
+    out.push_str(engine.current_composing());
+    engine.clear();
+}
+
+fn uvie_text(engine: &mut UltraFastViEngine, text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for word in text.split(' ') {
+        uvie_word(engine, word, &mut out);
+    }
+    out.pop();
+    out
+}
+
+fn random_text(chars: usize) -> String {
+    let mut state = 0x1234_5678_9abc_def0u64;
+    let mut text = String::with_capacity(chars);
+    for i in 0..chars {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        if i > 0 && i % 8 == 0 {
+            text.push(' ');
+        } else {
+            text.push(char::from(b'a' + (state % 26) as u8));
+        }
+    }
+    text
 }
 
 // ===========================================================================
@@ -649,6 +734,86 @@ fn test_sustained_no_commit() {
 }
 
 // ===========================================================================
+// Test 13: Four-engine memory comparison
+// ===========================================================================
+
+fn test_four_engine_memory() {
+    println!("=== 13. Four-engine memory comparison ===");
+    println!("  Struct sizes:");
+    println!("    bamboo Engine:          {:>8} B", std::mem::size_of::<Engine>());
+    println!("    uvie UltraFastViEngine: {:>8} B", std::mem::size_of::<UltraFastViEngine>());
+    println!("    skey SkeyEngine:        {:>8} B", std::mem::size_of::<SkeyEngine>());
+    println!(
+        "    vi IncrementalBuffer:   {:>8} B",
+        std::mem::size_of::<vi::methods::IncrementalBuffer<'static>>()
+    );
+    println!();
+
+    println!("  Per-scenario allocations (engine setup excluded):");
+    println!(
+        "{:<20} {:<8} {:>12} {:>10} {:>12} {:>12}",
+        "Scenario", "Engine", "Alloc'd", "Allocs", "Net live", "Output"
+    );
+    println!("{}", "-".repeat(78));
+
+    let words = ["tieengs", "vieetj", "nguwowif", "dduwowngf", "khuyeens", "khoong", "dduowcj"];
+    let make_text = |n: usize| (0..n).map(|i| words[i % words.len()]).collect::<Vec<_>>().join(" ");
+    let paragraph7 = make_text(7);
+    let paragraph112 = make_text(112);
+    let paragraph1000 = make_text(1000);
+    let english_base = "the quick brown fox jumps over the lazy dog and keeps running through the forest while the sun sets slowly behind the mountains";
+    let english_words: Vec<&str> = english_base.split(' ').collect();
+    let english =
+        (0..128).map(|i| english_words[i % english_words.len()]).collect::<Vec<_>>().join(" ");
+    let random = random_text(256);
+
+    let scenarios = [
+        ("7 words", paragraph7.as_str()),
+        ("112 words", paragraph112.as_str()),
+        ("1000 words", paragraph1000.as_str()),
+        ("english 128", english.as_str()),
+        ("random 256", random.as_str()),
+    ];
+
+    for (label, text) in scenarios {
+        let mut bamboo = Engine::new(InputMethod::telex());
+        bamboo.warm_up();
+        let mut uvie = UltraFastViEngine::new();
+        let skey = SkeyEngine::new(Method::Telex);
+
+        // One warm pass so one-time growth (e.g. bamboo's DFA arena) is
+        // excluded and the table shows steady-state per-scenario cost.
+        bamboo.process_str(text, Mode::Vietnamese);
+        let _ = bamboo.get_processed_str(OutputOptions::FULL_TEXT);
+        let _ = uvie_text(&mut uvie, text);
+        let _ = skey_text(&skey, text);
+        let _ = vi_text(text);
+        bamboo.reset();
+
+        measure_four(label, "bamboo", || {
+            bamboo.process_str(text, Mode::Vietnamese);
+            bamboo.get_processed_str(OutputOptions::FULL_TEXT)
+        });
+        measure_four(label, "uvie", || uvie_text(&mut uvie, text));
+        measure_four(label, "skey", || skey_text(&skey, text));
+        measure_four(label, "vi", || vi_text(text));
+    }
+
+    measure_four("cold start", "bamboo", || {
+        let mut e = Engine::new(InputMethod::telex());
+        e.process_str("dduwowcj", Mode::Vietnamese);
+        e.get_processed_str(OutputOptions::FULL_TEXT)
+    });
+    measure_four("cold start", "uvie", || {
+        let mut e = UltraFastViEngine::new();
+        uvie_text(&mut e, "dduwowcj")
+    });
+    measure_four("cold start", "skey", || SkeyEngine::new(Method::Telex).transform("dduwowcj"));
+    measure_four("cold start", "vi", || vi_text("dduwowcj"));
+    println!();
+}
+
+// ===========================================================================
 // Main
 // ===========================================================================
 
@@ -678,6 +843,7 @@ fn main() {
     test_extreme_english();
     test_dfa_saturation();
     test_sustained_no_commit();
+    test_four_engine_memory();
 
     println!("╔══════════════════════════════════════════════════════════════════════╗");
     println!("║                          Profiling Complete                        ║");

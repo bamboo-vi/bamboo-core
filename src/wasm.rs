@@ -26,7 +26,11 @@ impl BambooWasmEngine {
     /// Creates a new engine instance with the default Telex input method.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self { inner: crate::engine::Engine::new(crate::input_method::InputMethod::telex()) }
+        Self {
+            inner: crate::engine::Engine::from_preset(
+                crate::input_method::InputMethodPreset::Telex,
+            ),
+        }
     }
 
     /// Processes a single character and returns the current transformed word.
