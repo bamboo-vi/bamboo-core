@@ -10,6 +10,8 @@ pub struct EngineRules {
     pub(crate) non_ascii_rule_indices: Arc<[(char, (usize, usize))]>,
     pub(crate) ascii_effect_keys: [bool; 128],
     pub(crate) non_ascii_effect_keys: Arc<[char]>,
+    pub(crate) ascii_tone_keys: [bool; 128],
+    pub(crate) non_ascii_tone_keys: Arc<[char]>,
 }
 
 impl EngineRules {
@@ -74,12 +76,27 @@ impl EngineRules {
         non_ascii_effect_keys.sort_unstable();
         non_ascii_effect_keys.dedup();
 
+        let mut ascii_tone_keys = [false; 128];
+        let mut non_ascii_tone_keys: Vec<char> = Vec::new();
+        for key in &im.tone_keys {
+            let key = lower(*key);
+            if key.is_ascii() {
+                ascii_tone_keys[key as usize] = true;
+            } else {
+                non_ascii_tone_keys.push(key);
+            }
+        }
+        non_ascii_tone_keys.sort_unstable();
+        non_ascii_tone_keys.dedup();
+
         Self {
             all_rules: all_rules.into(),
             ascii_rule_indices,
             non_ascii_rule_indices: non_ascii_indices.into(),
             ascii_effect_keys,
             non_ascii_effect_keys: non_ascii_effect_keys.into(),
+            ascii_tone_keys,
+            non_ascii_tone_keys: non_ascii_tone_keys.into(),
         }
     }
 }
