@@ -69,7 +69,7 @@ pub(crate) const fn strip_mark(c: char) -> char {
 }
 
 // Packed parallels, derived from the char rows above at compile time.
-pub(crate) static FC_0_PACKED: [PackedToken; 17] = pack_row(&FC_0);
+pub(crate) static FC_0_PACKED: [PackedToken; 20] = pack_row(&FC_0);
 pub(crate) static FC_1_PACKED: [PackedToken; 6] = pack_row(&FC_1);
 pub(crate) static FC_2_PACKED: [PackedToken; 6] = pack_row(&FC_2);
 pub(crate) static FC_3_PACKED: [PackedToken; 2] = pack_row(&FC_3);

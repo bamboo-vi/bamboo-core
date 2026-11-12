@@ -40,6 +40,11 @@ fn test_telex_comprehensive() {
     test_input(im.clone(), "reboot", "reboot");
 
     test_input(im.clone(), "dowwnloads", "downloads");
+
+    test_input(im.clone(), "zaayj", "zậy");
+    test_input(im.clone(), "faayj", "fậy");
+    test_input(im.clone(), "jaayj", "jậy");
+    test_input(im.clone(), "waayj", "wậy");
 }
 
 #[test]
