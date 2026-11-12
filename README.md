@@ -9,6 +9,7 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 ## Features
 
 - **Telex, VNI, VIQR** input methods with custom input method support
+- **Extended phonetic onsets**: accepts `f`, `j`, and `w` as initial consonants alongside `z`
 - **Hybrid engine**: Rule-based transformations + Lazy JIT DFA caching
 - **SWAR / Vectorized matching**: Branchless 8-byte word lookups for transition routing
 - **Parallel batch processing**: Rayon-powered work-stealing for bulk text processing (`parallel` feature)
@@ -22,7 +23,7 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 
 ```toml
 [dependencies]
-bamboo-core = "0.5.4"
+bamboo-core = "0.5.5"
 ```
 
 ### Legacy Charset Conversion (0.5.1)

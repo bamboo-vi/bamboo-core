@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-11-12
+
+### Added
+
+- Accept `f`, `j`, and `w` as extended initial consonants in the same onset class as `z` for
+  phonetic/typing spellings.
+
+### Fixed
+
+- Preserve a completed Vietnamese syllable when a Telex/VNI mark key is refused instead of
+  restoring consumed mark keys as raw text; the refused key remains literal.
+
 ## [0.5.4] - 2026-11-08
 
 ### Added

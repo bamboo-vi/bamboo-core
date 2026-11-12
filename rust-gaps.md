@@ -1,6 +1,6 @@
 # Các giới hạn hành vi đã biết (bamboo-rust)
 
-> **Cập nhật 23/10/2026 — 0.5.3.** Tài liệu này chỉ ghi các điểm còn cần chốt
+> **Cập nhật 12/11/2026 — 0.5.5.** Tài liệu này chỉ ghi các điểm còn cần chốt
 > hợp đồng hoặc cải thiện. Các số liệu lịch sử nằm ở
 > `../bench-fcitx5/comparison-2026-10-21.md`; chúng không phải kết luận cho mã hiện tại.
 
@@ -22,6 +22,10 @@
   thô khi phần nối không còn là tiền tố tiếng Việt hợp lệ. Đây là chính sách kiểm tra chính tả,
   không phải lỗi mất preedit. Với `auto_correct=false`, `VieetjNam` cho `ViệtNam`; addon Ngó
   Sen dùng chế độ này.
+- **Phím dấu bị từ chối sau âm tiết hợp lệ:** từ 0.5.5, giữ âm tiết đã hoàn tất và thêm phím bị từ
+  chối theo dạng literal thay vì khôi phục các phím dấu đã được tiêu thụ trước đó.
+- **Onset phiên âm mở rộng:** `f`, `j`, `w`, `z` được chấp nhận như phụ âm đầu theo cùng nhóm vần;
+  đây là hỗ trợ kiểu gõ/phiên âm, không phải chính tả tiếng Việt chuẩn.
 
 ## Hành vi đã được xác nhận, không nên sửa nhầm
 
