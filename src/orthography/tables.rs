@@ -22,13 +22,16 @@ pub(crate) type Token = ([char; 4], u8);
 // Onset classes, mirroring Go bamboo-core's `firstConsonantSeqs` rows. Tokens
 // may appear in several classes (e.g. `đ` in rows 0 and 3): the lookup sets one
 // bit per matching row and `CV_ALLOWED_MASKS` unions their rime allowances.
-// `kr` is a bamboo extension (loanword onsets) and rides with the generic class.
-pub(crate) static FC_0: [Token; 17] = [
+// `kr` is a bamboo extension (loanword onset); `f`, `j`, `w`, and `z` are also
+// accepted here for phonetic/typing spellings.
+pub(crate) static FC_0: [Token; 20] = [
     (['b', '\0', '\0', '\0'], 1),
     (['d', '\0', '\0', '\0'], 1),
     (['đ', '\0', '\0', '\0'], 1),
+    (['f', '\0', '\0', '\0'], 1),
     (['g', '\0', '\0', '\0'], 1),
     (['g', 'h', '\0', '\0'], 2),
+    (['j', '\0', '\0', '\0'], 1),
     (['k', 'r', '\0', '\0'], 2),
     (['m', '\0', '\0', '\0'], 1),
     (['n', '\0', '\0', '\0'], 1),
@@ -40,6 +43,7 @@ pub(crate) static FC_0: [Token; 17] = [
     (['t', '\0', '\0', '\0'], 1),
     (['t', 'r', '\0', '\0'], 2),
     (['v', '\0', '\0', '\0'], 1),
+    (['w', '\0', '\0', '\0'], 1),
     (['z', '\0', '\0', '\0'], 1),
 ];
 pub(crate) static FC_1: [Token; 6] = [
