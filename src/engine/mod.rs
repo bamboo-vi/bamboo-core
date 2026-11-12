@@ -409,6 +409,11 @@ impl Engine {
             || self.rules.non_ascii_effect_keys.binary_search(&lower_key).is_ok()
     }
 
+    fn is_tone_key(&self, lower_key: char) -> bool {
+        (lower_key.is_ascii() && self.rules.ascii_tone_keys[lower_key as usize])
+            || self.rules.non_ascii_tone_keys.binary_search(&lower_key).is_ok()
+    }
+
     fn can_process_key_raw(&self, lower_key: char) -> bool {
         if crate::phonetics::is_alpha(lower_key) || self.is_input_method_key(lower_key) {
             return true;
@@ -424,7 +429,7 @@ impl Engine {
         composition: &mut TransformationStack,
         key: char,
         is_upper_case: bool,
-    ) -> bool {
+    ) -> (bool, bool) {
         let lower_key = lower(key);
         let rules = self.get_applicable_rules(lower_key);
         let mut trans_buf = TransformationStack::new();
@@ -461,7 +466,8 @@ impl Engine {
             ));
         }
 
-        if trans_buf.is_empty() {
+        let no_rule_applied = trans_buf.is_empty();
+        if no_rule_applied {
             crate::syllable::generate_fallback_transformations(
                 rules,
                 lower_key,
@@ -494,6 +500,23 @@ impl Engine {
                     || (t.effect_type == EffectType::MarkTransformation
                         && (t.effect == 0 || t.effect == Mark::Raw as u8)))
         });
+        let refused_effect_key = no_rule_applied
+            && self.is_input_method_key(lower_key)
+            // In Telex the mark keys are letters, so a refused letter can just be
+            // the next English letter. Only a non-letter key, or a tone key on a
+            // word that already carries a tone, clearly means a mark.
+            && (!lower_key.is_alphabetic()
+                || (self.is_tone_key(lower_key)
+                    && composition
+                        .as_slice()
+                        .iter()
+                        .any(|t| t.effect_type == EffectType::ToneTransformation)))
+            && trans_buf.as_slice().first().is_some_and(|t| {
+                t.effect_type == EffectType::Appending
+                    && !t.has_target()
+                    && t.key == lower_key
+                    && t.result == lower_key
+            });
 
         composition.extend_from_slice(trans_buf.as_slice());
         if self.config.free_tone_marking {
@@ -508,7 +531,7 @@ impl Engine {
                 );
             }
         }
-        has_undo
+        (has_undo, refused_effect_key)
     }
 
     /// Spreads a horn mark across a `uơ`/`ưo` + letter tail when the input
@@ -557,7 +580,7 @@ impl Engine {
         scratch: &mut TransformationStack,
         key: char,
         is_upper_case: bool,
-    ) -> bool {
+    ) -> (bool, bool) {
         // Stack-bounded: target indices below truncate into `u8`.
         debug_assert!(composition.len() <= MAX_ACTIVE_TRANS);
         let (syllable_abs_start, hint) =
@@ -575,7 +598,8 @@ impl Engine {
             }
         }
 
-        let has_undo = self.generate_transformations(scratch, key, is_upper_case);
+        let (has_undo, refused_effect_key) =
+            self.generate_transformations(scratch, key, is_upper_case);
 
         if offset != 0 {
             for t in scratch.as_mut_slice().iter_mut() {
@@ -586,7 +610,7 @@ impl Engine {
         }
 
         composition.extend_from_slice(scratch.as_slice());
-        has_undo
+        (has_undo, refused_effect_key)
     }
     /// Processes a string of characters and returns the resulting active word.
     ///
@@ -839,7 +863,18 @@ impl Engine {
         let mut scratch = TransformationStack::new();
 
         self.take_active_into(&mut work);
-        let has_undo =
+        // Spell-check the pre-key word only for keys that could be a mark; the
+        // check is wasted work for every other keystroke.
+        let valid_word_before_effect_key = self.config.auto_correct
+            && self.is_input_method_key(lower_key)
+            && (!lower_key.is_alphabetic()
+                || (self.is_tone_key(lower_key)
+                    && work
+                        .as_slice()
+                        .iter()
+                        .any(|t| t.effect_type == EffectType::ToneTransformation)))
+            && self.is_valid_internal(work.as_slice(), true);
+        let (has_undo, refused_effect_key) =
             self.new_composition_in_place(&mut work, &mut scratch, lower_key, is_upper_case);
         if has_undo {
             // Only lock into english bypass if the result of the undo is NOT a valid Vietnamese prefix.
@@ -853,7 +888,11 @@ impl Engine {
         }
 
         // Real-time Auto-restore when auto_correct is enabled:
-        self.apply_auto_correct(&mut work, has_undo);
+        self.apply_auto_correct(
+            &mut work,
+            has_undo,
+            valid_word_before_effect_key && refused_effect_key,
+        );
 
         // Try to update DFA (Lazy JIT).
         // Always cache using lowercase key so uppercase keys reuse the same DFA transitions.
@@ -985,9 +1024,14 @@ impl Engine {
         self.current_state_id = 0;
     }
 
-    /// Restores a mistyped word to raw keys when `auto_correct` is on and the
-    /// result is not a valid Vietnamese prefix (no-op otherwise).
-    fn apply_auto_correct(&mut self, work: &mut TransformationStack, has_undo: bool) {
+    /// Restores invalid transformed text to raw keys, except when a refused
+    /// effect key follows a completed Vietnamese syllable.
+    fn apply_auto_correct(
+        &mut self,
+        work: &mut TransformationStack,
+        has_undo: bool,
+        preserve_valid_word: bool,
+    ) {
         if has_undo || !self.config.auto_correct {
             return;
         }
@@ -995,6 +1039,11 @@ impl Engine {
             work.as_slice().iter().any(|t| t.has_target() || (t.key != '\0' && t.result != t.key));
 
         if has_transforms && !self.is_valid_internal(work.as_slice(), false) {
+            if preserve_valid_word {
+                // Keep the completed Vietnamese syllable and type the rest of this token literally.
+                self.english_bypass = true;
+                return;
+            }
             let raw_comp = crate::syllable::break_composition_slice(work.as_slice());
             let raw_len =
                 work.as_slice().iter().filter(|t| t.key != '\0').count().min(MAX_ACTIVE_TRANS);
