@@ -313,8 +313,6 @@ impl Engine {
         self.dfa_detached = false;
         self.snapshot_len = 0;
         self.scratch_engine = None;
-        // A syllable may start elsewhere once the valid onsets change.
-        self.syll_hint = crate::syllable::SyllHint::NONE;
     }
 
     /// Controls whether committed text is retained for `FULL_TEXT` output.
@@ -527,7 +525,7 @@ impl Engine {
             let (valid, tone_cvc) = crate::syllable::check_validity(
                 composition.as_slice(),
                 false,
-                self.config.onset_mode,
+                self.config.extended_onsets,
             );
             if valid && let Some(cvc) = tone_cvc {
                 crate::syllable::refresh_with_cvc(
@@ -592,7 +590,7 @@ impl Engine {
         let (syllable_abs_start, hint) = crate::syllable::last_syllable_start(
             composition.as_slice(),
             self.syll_hint,
-            self.config.onset_mode,
+            self.config.extended_onsets,
         );
         self.syll_hint = hint;
 
@@ -1288,7 +1286,7 @@ impl Engine {
         composition: &[Transformation],
         input_is_full_complete: bool,
     ) -> bool {
-        crate::syllable::is_valid(composition, input_is_full_complete, self.config.onset_mode)
+        crate::syllable::is_valid(composition, input_is_full_complete, self.config.extended_onsets)
     }
 
     /// Undoes the most recent physical key and recomputes the tone target when appropriate.
