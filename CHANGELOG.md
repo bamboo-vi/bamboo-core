@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
   (none), `OnsetMode::Z` (`z` only) or `OnsetMode::Extended` (`z`, `f`, `j`, `w`). In flags,
   `0x80` selects Standard and `0x100` Extended; neither bit means Z, so flags saved earlier keep
   working.
+- `OnsetMode::Extended` also accepts the finals `g`, `k`, `nk` and `h`, so a tone typed after them
+  lands as one typed before them does (`nhuwgx` -> `nhữg`, `cugx` -> `cũg`, `khoks` -> `khók`).
 
 ### Changed
 

@@ -194,10 +194,14 @@ fn spell_check(
             lc_chars[i] = lower(add_tone_to_char(resolved[abs], 0));
         }
 
+        let mut lc = &lc_chars[..lc_idxs.len()];
+        if onsets.allows_final(lc) {
+            lc = &[];
+        }
         return is_valid_cvc_chars(
             &fc_chars[..fc_idxs.len()],
             &vo_chars[..vo_idxs.len()],
-            &lc_chars[..lc_idxs.len()],
+            lc,
             input_is_full_complete,
         );
     }
@@ -212,12 +216,11 @@ fn spell_check(
     {
         return false;
     }
-    is_valid_cvc(
-        &fc,
-        &flatten_slice(cvc.vo_slice(), flatten_mode),
-        &flatten_slice(cvc.lc_slice(), flatten_mode),
-        input_is_full_complete,
-    )
+    let mut lc = flatten_slice(cvc.lc_slice(), flatten_mode);
+    if onsets.allows_final(&lc.chars().collect::<Vec<_>>()) {
+        lc.clear();
+    }
+    is_valid_cvc(&fc, &flatten_slice(cvc.vo_slice(), flatten_mode), &lc, input_is_full_complete)
 }
 
 /// Represents the broken-down parts of a Vietnamese syllable (Consonant-Vowel-Consonant).

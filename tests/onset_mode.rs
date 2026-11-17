@@ -7,7 +7,11 @@ fn config(mode: OnsetMode) -> Config {
 /// Types `keys` in Telex: `<` deletes the last character, and `1`, `2`, `3` switch to
 /// Standard, Z and Extended.
 fn typed(mode: OnsetMode, keys: &str) -> String {
-    let mut engine = Engine::with_config(InputMethod::telex(), config(mode));
+    typed_with(config(mode), keys)
+}
+
+fn typed_with(start: Config, keys: &str) -> String {
+    let mut engine = Engine::with_config(InputMethod::telex(), start);
     for key in keys.chars() {
         match key {
             '<' => engine.remove_last_output_char(),
@@ -82,4 +86,52 @@ fn a_new_mode_applies_from_the_next_key() {
     assert_eq!(typed(OnsetMode::Extended, "jaayj2"), "jậy");
     // The next key reads the word again with the new mode, as a fresh engine would.
     assert_eq!(typed(OnsetMode::Z, "zajo1z"), "zao");
+}
+
+#[test]
+fn extended_finals_take_a_tone_typed_on_either_side() {
+    let words = [
+        ("nhuwxg", "nhuwgx", "nhữg"),
+        ("cuxg", "cugx", "cũg"),
+        ("mifnk", "minkf", "mìnk"),
+        ("khosk", "khoks", "khók"),
+    ];
+    for auto_correct in [true, false] {
+        let config =
+            Config::builder().onset_mode(OnsetMode::Extended).auto_correct(auto_correct).build();
+        for (tone_first, tone_last, want) in words {
+            assert_eq!(typed_with(config, tone_first), want, "auto_correct {auto_correct}");
+            assert_eq!(typed_with(config, tone_last), want, "auto_correct {auto_correct}");
+        }
+    }
+    // k stops the syllable like c, so it takes only the acute and dot tones.
+    assert_eq!(typed(OnsetMode::Extended, "khokf"), "khokf");
+}
+
+#[test]
+fn other_modes_leave_a_tone_after_these_finals_as_typed() {
+    for mode in [OnsetMode::Standard, OnsetMode::Z] {
+        for keys in ["nhuwgx", "cugx", "minkf", "khoks"] {
+            assert_eq!(typed(mode, keys), keys, "{mode:?}");
+        }
+    }
+}
+
+#[test]
+fn backspace_over_an_extended_final() {
+    assert_eq!(typed(OnsetMode::Extended, "nhuwgx<"), "nhữ");
+    assert_eq!(typed(OnsetMode::Extended, "nhuwgx<g"), "nhữg");
+    assert_eq!(typed(OnsetMode::Extended, "minkf<"), "mìn");
+    // The tone key again takes the tone back off, as it does on any word.
+    assert_eq!(typed(OnsetMode::Extended, "khoks<s"), "khos");
+}
+
+#[test]
+fn english_words_ending_in_these_finals_compose_only_in_extended() {
+    for word in ["book", "thanks", "bags"] {
+        assert_eq!(typed(OnsetMode::Z, word), word);
+    }
+    assert_eq!(typed(OnsetMode::Extended, "book"), "bôk");
+    assert_eq!(typed(OnsetMode::Extended, "thanks"), "thánk");
+    assert_eq!(typed(OnsetMode::Extended, "bags"), "bág");
 }

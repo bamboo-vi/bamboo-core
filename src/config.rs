@@ -45,7 +45,8 @@ pub enum OnsetMode {
     /// `z` is an onset (`zậy`), as before 0.5.5.
     #[default]
     Z,
-    /// `z`, `f`, `j` and `w` are onsets (`zậy`, `fải`, `jậy`, `wá`), as in 0.5.5.
+    /// `z`, `f`, `j` and `w` are onsets (`zậy`, `fải`, `jậy`, `wá`), as in 0.5.5, and `g`, `k`,
+    /// `nk` and `h` are finals, so a tone typed after them still lands (`nhuwgx` -> `nhữg`).
     Extended,
 }
 
@@ -57,6 +58,11 @@ impl OnsetMode {
             'f' | 'j' | 'w' => matches!(self, Self::Extended),
             _ => true,
         }
+    }
+
+    /// Whether `final_chars`, lowercase, is a final that only this mode allows.
+    pub(crate) const fn allows_final(self, final_chars: &[char]) -> bool {
+        matches!(self, Self::Extended) && matches!(final_chars, ['g'] | ['k'] | ['n', 'k'] | ['h'])
     }
 }
 
