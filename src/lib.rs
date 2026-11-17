@@ -226,7 +226,7 @@ pub mod parallel {
     }
 }
 
-pub use config::{BracketMode, Config, ConfigBuilder, OnsetMode, ToneStyle, W2uMode};
+pub use config::{BracketMode, Config, ConfigBuilder, ToneStyle, W2uMode};
 pub(crate) use encoder::tables as charset_def;
 pub use encoder::{Charset, decode_charset, encode_charset};
 #[allow(deprecated)]

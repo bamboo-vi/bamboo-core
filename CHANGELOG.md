@@ -6,18 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- `Config::onset_mode` picks which onsets outside standard spelling are valid: `OnsetMode::Standard`
-  (none), `OnsetMode::Z` (`z` only) or `OnsetMode::Extended` (`z`, `f`, `j`, `w`). In flags,
-  `0x80` selects Standard and `0x100` Extended; neither bit means Z, so flags saved earlier keep
-  working.
-- `OnsetMode::Extended` also accepts the finals `g`, `k`, `nk` and `h`, so a tone typed after them
-  lands as one typed before them does (`nhuwgx` -> `nhữg`, `cugx` -> `cũg`, `khoks` -> `khók`).
+- `Config::extended_onsets` (builder: `extended_onsets`) turns the `f`, `j`, and `w` onsets from
+  0.5.5 on or off as a group. It defaults to `true`, so behavior is unchanged; `z` stays valid
+  either way. Turning it off keeps English words such as `just` and `ferry` as typed when
+  auto-correct is on.
+- Config flag bit `0x80` (`BAMBOO_CONFIG_NO_EXTENDED_ONSETS` in the C header) turns it off. Flags
+  saved before this release lack the bit and keep the 0.5.5 behavior.
 
-### Changed
+### Breaking
 
-- The default is `OnsetMode::Z`, as before 0.5.5. 0.5.5 accepted `f`, `j` and `w` everywhere,
-  which turned English words such as `just` and `ferry` into `jút` and `fery`; set
-  `OnsetMode::Extended` to keep the 0.5.5 behavior.
+- `Config` has a new public field, so code that builds it with a struct literal listing every
+  field no longer compiles. Add `..Default::default()` or use `Config::builder()`. Planned for
+  0.6.0.
 
 ## [0.5.5] - 2026-11-12
 

@@ -382,8 +382,7 @@ pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
 ///     * 0x10: `w` always becomes `ư` (wins over 0x08)
 ///     * 0x20: `[ ] { }` type `ơ ư Ơ Ư` except at the start of a word
 ///     * 0x40: `[ ] { }` always type `ơ ư Ơ Ư` (wins over 0x20)
-///     * 0x80: `z`, `f`, `j` and `w` are not onsets
-///     * 0x100: `z`, `f`, `j` and `w` are onsets (wins over 0x80); neither bit allows `z` only
+///     * 0x80: `f`, `j` and `w` are not onsets (`z` still is)
 ///
 ///   [`bamboo_engine_new`] uses `0x07`.
 ///
@@ -773,6 +772,8 @@ mod tests {
         // A bracket the engine does not process ends the word.
         assert_eq!(typed(0x07, "m[f"), "f");
         assert_eq!(typed(0x07 | 0x20, "m[f"), "mờ");
+        assert_eq!(typed(0x07, "jaayj"), "jậy");
+        assert_eq!(typed(0x07 | 0x80, "jaayj"), "jaayj");
     }
 
     #[test]

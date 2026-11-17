@@ -42,10 +42,9 @@ fn test_telex_comprehensive() {
     test_input(im.clone(), "dowwnloads", "downloads");
 
     test_input(im.clone(), "zaayj", "zậy");
-    // f, j and w need OnsetMode::Extended; see tests/onset_mode.rs.
-    test_input(im.clone(), "faayj", "faayj");
-    test_input(im.clone(), "jaayj", "jaayj");
-    test_input(im.clone(), "waayj", "waayj");
+    test_input(im.clone(), "faayj", "fậy");
+    test_input(im.clone(), "jaayj", "jậy");
+    test_input(im.clone(), "waayj", "wậy");
 }
 
 #[test]
