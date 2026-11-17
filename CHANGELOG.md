@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `Config::onset_mode` picks which onsets outside standard spelling are valid: `OnsetMode::Standard`
+  (none), `OnsetMode::Z` (`z` only) or `OnsetMode::Extended` (`z`, `f`, `j`, `w`). In flags,
+  `0x80` selects Standard and `0x100` Extended; neither bit means Z, so flags saved earlier keep
+  working.
+
+### Changed
+
+- The default is `OnsetMode::Z`, as before 0.5.5. 0.5.5 accepted `f`, `j` and `w` everywhere,
+  which turned English words such as `just` and `ferry` into `jút` and `fery`; set
+  `OnsetMode::Extended` to keep the 0.5.5 behavior.
+
 ## [0.5.5] - 2026-11-12
 
 ### Added

@@ -382,6 +382,8 @@ pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
 ///     * 0x10: `w` always becomes `ư` (wins over 0x08)
 ///     * 0x20: `[ ] { }` type `ơ ư Ơ Ư` except at the start of a word
 ///     * 0x40: `[ ] { }` always type `ơ ư Ơ Ư` (wins over 0x20)
+///     * 0x80: `z`, `f`, `j` and `w` are not onsets
+///     * 0x100: `z`, `f`, `j` and `w` are onsets (wins over 0x80); neither bit allows `z` only
 ///
 ///   [`bamboo_engine_new`] uses `0x07`.
 ///

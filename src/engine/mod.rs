@@ -313,6 +313,8 @@ impl Engine {
         self.dfa_detached = false;
         self.snapshot_len = 0;
         self.scratch_engine = None;
+        // A syllable may start elsewhere once the valid onsets change.
+        self.syll_hint = crate::syllable::SyllHint::NONE;
     }
 
     /// Controls whether committed text is retained for `FULL_TEXT` output.
@@ -522,7 +524,11 @@ impl Engine {
         if self.config.free_tone_marking {
             // `check_validity` hands back the tone-check breakdown so the
             // refresh below reuses a single `extract_cvc_trans` per keystroke.
-            let (valid, tone_cvc) = crate::syllable::check_validity(composition.as_slice(), false);
+            let (valid, tone_cvc) = crate::syllable::check_validity(
+                composition.as_slice(),
+                false,
+                self.config.onset_mode,
+            );
             if valid && let Some(cvc) = tone_cvc {
                 crate::syllable::refresh_with_cvc(
                     composition.as_mut_slice(),
@@ -583,8 +589,11 @@ impl Engine {
     ) -> (bool, bool) {
         // Stack-bounded: target indices below truncate into `u8`.
         debug_assert!(composition.len() <= MAX_ACTIVE_TRANS);
-        let (syllable_abs_start, hint) =
-            crate::syllable::last_syllable_start(composition.as_slice(), self.syll_hint);
+        let (syllable_abs_start, hint) = crate::syllable::last_syllable_start(
+            composition.as_slice(),
+            self.syll_hint,
+            self.config.onset_mode,
+        );
         self.syll_hint = hint;
 
         composition.drain_to(syllable_abs_start, scratch);
@@ -1279,7 +1288,7 @@ impl Engine {
         composition: &[Transformation],
         input_is_full_complete: bool,
     ) -> bool {
-        crate::syllable::is_valid(composition, input_is_full_complete)
+        crate::syllable::is_valid(composition, input_is_full_complete, self.config.onset_mode)
     }
 
     /// Undoes the most recent physical key and recomputes the tone target when appropriate.

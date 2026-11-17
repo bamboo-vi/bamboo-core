@@ -34,6 +34,32 @@ pub enum BracketMode {
     Everywhere,
 }
 
+/// Which onsets outside standard Vietnamese spelling count as valid.
+///
+/// Typing spellings such as `zậy` or `fải` need them, but every extra onset also turns some
+/// English words into Vietnamese-looking ones (`just` -> `jút` with [`OnsetMode::Extended`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum OnsetMode {
+    /// Standard spelling only: `z`, `f`, `j` and `w` are not onsets.
+    Standard,
+    /// `z` is an onset (`zậy`), as before 0.5.5.
+    #[default]
+    Z,
+    /// `z`, `f`, `j` and `w` are onsets (`zậy`, `fải`, `jậy`, `wá`), as in 0.5.5.
+    Extended,
+}
+
+impl OnsetMode {
+    /// Whether `c`, a lowercase onset on its own, is allowed in this mode.
+    pub(crate) const fn allows(self, c: char) -> bool {
+        match c {
+            'z' => !matches!(self, Self::Standard),
+            'f' | 'j' | 'w' => matches!(self, Self::Extended),
+            _ => true,
+        }
+    }
+}
+
 /// Placement style for tone marks on ambiguous vowel sequences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ToneStyle {
@@ -89,6 +115,10 @@ pub struct Config {
     ///
     /// Default: [`BracketMode::Disabled`].
     pub bracket_mode: BracketMode,
+    /// Which onsets outside standard spelling are valid; see [`OnsetMode`].
+    ///
+    /// Default: [`OnsetMode::Z`].
+    pub onset_mode: OnsetMode,
 }
 
 impl Default for Config {
@@ -99,6 +129,7 @@ impl Default for Config {
             auto_correct: true,
             w2u_mode: W2uMode::Disabled,
             bracket_mode: BracketMode::Disabled,
+            onset_mode: OnsetMode::Z,
         }
     }
 }
@@ -112,6 +143,7 @@ impl Config {
             auto_correct: true,
             w2u_mode: W2uMode::Disabled,
             bracket_mode: BracketMode::Disabled,
+            onset_mode: OnsetMode::Z,
         }
     }
 
@@ -134,6 +166,11 @@ impl Config {
     /// - Bit 4 (0x10): `w2u_mode` is [`W2uMode::Everywhere`] (wins over bit 3)
     /// - Bit 5 (0x20): `bracket_mode` is [`BracketMode::NonStart`]
     /// - Bit 6 (0x40): `bracket_mode` is [`BracketMode::Everywhere`] (wins over bit 5)
+    /// - Bit 7 (0x80): `onset_mode` is [`OnsetMode::Standard`]
+    /// - Bit 8 (0x100): `onset_mode` is [`OnsetMode::Extended`] (wins over bit 7)
+    ///
+    /// [`OnsetMode::Z`] sets neither bit, so flags saved before these bits existed read as
+    /// [`OnsetMode::Z`].
     pub const fn to_flags(self) -> u32 {
         let mut flags = 0;
         if self.free_tone_marking {
@@ -155,6 +192,11 @@ impl Config {
             BracketMode::NonStart => flags |= 1 << 5,
             BracketMode::Everywhere => flags |= 1 << 6,
         }
+        match self.onset_mode {
+            OnsetMode::Standard => flags |= 1 << 7,
+            OnsetMode::Z => {}
+            OnsetMode::Extended => flags |= 1 << 8,
+        }
         flags
     }
 
@@ -167,6 +209,11 @@ impl Config {
     /// - Bit 4 (0x10): `w2u_mode` is [`W2uMode::Everywhere`] (wins over bit 3)
     /// - Bit 5 (0x20): `bracket_mode` is [`BracketMode::NonStart`]
     /// - Bit 6 (0x40): `bracket_mode` is [`BracketMode::Everywhere`] (wins over bit 5)
+    /// - Bit 7 (0x80): `onset_mode` is [`OnsetMode::Standard`]
+    /// - Bit 8 (0x100): `onset_mode` is [`OnsetMode::Extended`] (wins over bit 7)
+    ///
+    /// [`OnsetMode::Z`] sets neither bit, so flags saved before these bits existed read as
+    /// [`OnsetMode::Z`].
     pub const fn from_flags(flags: u32) -> Self {
         Self {
             free_tone_marking: (flags & (1 << 0)) != 0,
@@ -185,6 +232,13 @@ impl Config {
                 BracketMode::NonStart
             } else {
                 BracketMode::Disabled
+            },
+            onset_mode: if flags & (1 << 8) != 0 {
+                OnsetMode::Extended
+            } else if flags & (1 << 7) != 0 {
+                OnsetMode::Standard
+            } else {
+                OnsetMode::Z
             },
         }
     }
@@ -239,6 +293,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets which onsets outside standard spelling are valid.
+    pub const fn onset_mode(mut self, mode: OnsetMode) -> Self {
+        self.config.onset_mode = mode;
+        self
+    }
+
     /// Builds and returns the final [`Config`].
     pub const fn build(self) -> Config {
         self.config
@@ -252,15 +312,23 @@ mod tests {
     #[test]
     fn to_flags_from_flags_roundtrip() {
         let configs = [
-            (true, true, true, W2uMode::Disabled, BracketMode::Disabled),
-            (false, false, false, W2uMode::NonStart, BracketMode::NonStart),
-            (true, false, true, W2uMode::Everywhere, BracketMode::Everywhere),
-            (false, true, false, W2uMode::Disabled, BracketMode::NonStart),
-            (true, false, false, W2uMode::NonStart, BracketMode::Disabled),
+            (true, true, true, W2uMode::Disabled, BracketMode::Disabled, OnsetMode::Z),
+            (false, false, false, W2uMode::NonStart, BracketMode::NonStart, OnsetMode::Standard),
+            (true, false, true, W2uMode::Everywhere, BracketMode::Everywhere, OnsetMode::Extended),
+            (false, true, false, W2uMode::Disabled, BracketMode::NonStart, OnsetMode::Extended),
+            (true, false, false, W2uMode::NonStart, BracketMode::Disabled, OnsetMode::Standard),
         ];
-        for (free_tone_marking, std_tone_style, auto_correct, w2u_mode, bracket_mode) in configs {
-            let original =
-                Config { free_tone_marking, std_tone_style, auto_correct, w2u_mode, bracket_mode };
+        for (free_tone_marking, std_tone_style, auto_correct, w2u_mode, bracket_mode, onset_mode) in
+            configs
+        {
+            let original = Config {
+                free_tone_marking,
+                std_tone_style,
+                auto_correct,
+                w2u_mode,
+                bracket_mode,
+                onset_mode,
+            };
             let flags = original.to_flags();
             let restored = Config::from_flags(flags);
             assert_eq!(original, restored, "Round-trip failed for {original:?}");
@@ -290,6 +358,7 @@ mod tests {
                 auto_correct: false,
                 w2u_mode: W2uMode::Disabled,
                 bracket_mode: BracketMode::Disabled,
+                onset_mode: OnsetMode::Z,
             }
         );
     }
@@ -301,5 +370,15 @@ mod tests {
         assert_eq!(Config::from_flags(0x18).w2u_mode, W2uMode::Everywhere);
         // Flags written before the w2u bits existed keep w2u off.
         assert_eq!(Config::from_flags(7).w2u_mode, W2uMode::Disabled);
+    }
+
+    #[test]
+    fn onset_flag_bits() {
+        assert_eq!(Config::builder().onset_mode(OnsetMode::Standard).build().to_flags(), 0x87);
+        assert_eq!(Config::builder().onset_mode(OnsetMode::Extended).build().to_flags(), 0x107);
+        assert_eq!(Config::from_flags(0x187).onset_mode, OnsetMode::Extended);
+        // Flags written before the onset bits existed, by 0.5.5 too, read as Z.
+        assert_eq!(Config::from_flags(7).onset_mode, OnsetMode::Z);
+        assert_eq!(Config::from_flags(0x7f).onset_mode, OnsetMode::Z);
     }
 }
