@@ -58,6 +58,8 @@ pub struct Engine {
     english_bypass: bool,
     /// Set by a config change mid-word: the next edit first re-types the active keys.
     replay_pending: bool,
+    /// Whether every active transformation came from Vietnamese keystrokes.
+    replayable: bool,
     track_committed_text: bool,
     /// True once the DFA refused a new composition (frozen at
     /// [`crate::dfa::DFA_MAX_STATES`]).
@@ -149,6 +151,7 @@ impl Engine {
             syll_hint: crate::syllable::SyllHint::NONE,
             english_bypass: false,
             replay_pending: false,
+            replayable: true,
             dfa_detached: false,
         }
     }
@@ -307,47 +310,78 @@ impl Engine {
     /// Updates the engine configuration.
     ///
     /// The output does not change until the next key, undo or restore. That edit then works as
-    /// if an engine with the new config had typed the keys of the active composition in
-    /// [`Mode::Vietnamese`]; committed text is left as it is.
+    /// if an engine with the new config had typed the active Vietnamese keys. Compositions
+    /// with unknown or mixed provenance, or whose replay would commit, are kept unchanged.
+    /// Committed text is left as it is.
     pub fn set_config(&mut self, config: Config) {
         if config == self.config {
             return;
         }
         self.config = config;
+        // Preserve undo compositions before dropping the old DFA.
+        for i in 0..self.snapshot_len {
+            let snap = &mut self.snapshots[i];
+            if snap.state_id != 0 && snap.flags & FLAG_NEEDS_BUFFER == 0 {
+                let buffers = self.bypass_buffers.get_or_insert_with(|| {
+                    Box::new([[Transformation::default(); MAX_ACTIVE_TRANS]; MAX_ACTIVE_TRANS])
+                });
+                let comp = self.dfa.get_composition(snap.state_id as u32);
+                let len = (snap.active_len as usize).min(comp.len());
+                buffers[i][..len].copy_from_slice(&comp[..len]);
+                for (j, t) in buffers[i][..len].iter_mut().enumerate() {
+                    t.is_upper_case = (snap.upper_mask >> j) & 1 != 0;
+                }
+                snap.flags |= FLAG_NEEDS_BUFFER;
+            }
+            snap.state_id = 0;
+        }
         // Cached transitions were computed with the old settings.
         self.dfa = crate::dfa::Dfa::new();
         self.current_state_id = 0;
         self.dfa_detached = false;
-        self.snapshot_len = 0;
         self.scratch_engine = None;
-        self.replay_pending = self.active_len > 0;
+        self.replay_pending = self.active_len > 0 && self.replayable;
+        if !self.replay_pending {
+            self.syll_hint = crate::syllable::SyllHint::NONE;
+        }
     }
 
     /// Re-types the active keys after a config change, so hint, bypass and undo state all come
-    /// from the new config.
+    /// from the new config. Falls back to keeping the composition unchanged when it cannot be
+    /// replayed faithfully: raw keys unknown (rebuilt text) or not all Vietnamese (English
+    /// mode), or a replay that would commit mid-word.
     #[cold]
     pub(crate) fn replay_if_pending(&mut self) {
         if !self.replay_pending {
             return;
         }
         self.replay_pending = false;
-        let mut keys = ['\0'; MAX_ACTIVE_TRANS];
-        let mut len = 0;
+        let mut replay = Self::with_shared_rules(
+            Arc::clone(&self.input_method),
+            Arc::clone(&self.rules),
+            self.config,
+        );
         for t in self.active_slice().iter().filter(|t| t.key != '\0') {
-            keys[len] = if t.is_upper_case { upper(t.key) } else { t.key };
-            len += 1;
+            replay
+                .process_key(if t.is_upper_case { upper(t.key) } else { t.key }, Mode::Vietnamese);
+            if !replay.committed_text.is_empty() || !replay.committed_raw.is_empty() {
+                self.replayable = false;
+                self.syll_hint = crate::syllable::SyllHint::NONE;
+                return;
+            }
         }
-        self.cached_output.clear();
-        self.active_len = 0;
-        self.active_upper_mask = 0;
-        self.current_state_id = 0;
-        self.snapshot_len = 0;
-        self.english_bypass = false;
-        self.dfa_detached = false;
-        self.syll_hint = crate::syllable::SyllHint::NONE;
-        for &key in &keys[..len] {
-            self.process_key(key, Mode::Vietnamese);
-        }
+        self.active_buffer = replay.active_buffer;
+        self.active_len = replay.active_len;
+        self.active_upper_mask = replay.active_upper_mask;
+        self.cached_output = replay.cached_output;
+        self.current_state_id = replay.current_state_id;
+        self.snapshots = replay.snapshots;
+        self.snapshot_len = replay.snapshot_len;
+        self.bypass_buffers = replay.bypass_buffers;
+        self.english_bypass = replay.english_bypass;
+        self.dfa_detached = replay.dfa_detached;
+        self.syll_hint = replay.syll_hint;
+        self.dfa = replay.dfa;
     }
 
     /// Controls whether committed text is retained for `FULL_TEXT` output.
@@ -967,6 +1001,9 @@ impl Engine {
         if mode != Mode::English && self.active_len > 0 {
             self.push_snapshot();
         }
+        if mode == Mode::English {
+            self.replayable = false;
+        }
         if is_upper_case {
             self.active_upper_mask |= 1u32 << self.active_len;
         }
@@ -1044,6 +1081,7 @@ impl Engine {
         self.snapshot_len = 0;
         self.active_upper_mask = 0;
         self.english_bypass = false;
+        self.replayable = true;
         self.dfa_detached = false;
         self.current_state_id = 0;
         if self.track_committed_text {
@@ -1194,6 +1232,7 @@ impl Engine {
         self.snapshot_len = 0;
         self.english_bypass = false;
         self.replay_pending = false;
+        self.replayable = true;
         self.dfa_detached = false;
     }
 
@@ -1363,6 +1402,9 @@ impl Engine {
                 self.config.std_tone_style,
             );
         }
+        if self.active_len == 0 {
+            self.replayable = true;
+        }
         self.update_cached_output();
     }
 
@@ -1396,6 +1438,7 @@ impl Engine {
             write += 1;
         }
         self.active_len = write;
+        self.replayable = self.active_len == 0;
 
         // Keystroke snapshots are stale after compaction; the DFA fast path no longer matches.
         self.snapshot_len = 0;
@@ -1436,6 +1479,7 @@ impl Engine {
         self.snapshot_len = 0;
         self.english_bypass = false;
         self.replay_pending = false;
+        self.replayable = true;
         self.dfa_detached = false;
     }
 
