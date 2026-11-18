@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `Config::extended_onsets` (builder: `extended_onsets`) turns the `f`, `j`, and `w` onsets from
+  0.5.5 on or off as a group. It defaults to `true`, so behavior is unchanged; `z` stays valid
+  either way. Turning it off keeps English words such as `just` and `ferry` as typed when
+  auto-correct is on.
+- Config flag bit `0x80` (`BAMBOO_CONFIG_NO_EXTENDED_ONSETS` in the C header) turns it off. Flags
+  saved before this release lack the bit and keep the 0.5.5 behavior.
+
+### Changed
+
+- After `set_config` changes the config mid-word, the next key, undo, backspace or restore works
+  as if an engine with the new config had typed the keys of the active composition in Vietnamese
+  mode; the output does not change before that. Undo right after a config change used to do
+  nothing, and a word that had entered English bypass stayed in it.
+
+### Breaking
+
+- `Config` has a new public field, so code that builds it with a struct literal listing every
+  field no longer compiles. Add `..Default::default()` or use `Config::builder()`. Planned for
+  0.6.0.
+
 ## [0.5.5] - 2026-11-12
 
 ### Added
