@@ -591,11 +591,8 @@ impl Engine {
         if self.config.free_tone_marking {
             // `check_validity` hands back the tone-check breakdown so the
             // refresh below reuses a single `extract_cvc_trans` per keystroke.
-            let (valid, tone_cvc) = crate::syllable::check_validity(
-                composition.as_slice(),
-                false,
-                self.config.extended_onsets,
-            );
+            let (valid, tone_cvc) =
+                crate::syllable::check_validity(composition.as_slice(), false, self.config);
             if valid && let Some(cvc) = tone_cvc {
                 crate::syllable::refresh_with_cvc(
                     composition.as_mut_slice(),
@@ -659,7 +656,7 @@ impl Engine {
         let (syllable_abs_start, hint) = crate::syllable::last_syllable_start(
             composition.as_slice(),
             self.syll_hint,
-            self.config.extended_onsets,
+            self.config,
         );
         self.syll_hint = hint;
 
@@ -1364,7 +1361,7 @@ impl Engine {
         composition: &[Transformation],
         input_is_full_complete: bool,
     ) -> bool {
-        crate::syllable::is_valid(composition, input_is_full_complete, self.config.extended_onsets)
+        crate::syllable::is_valid(composition, input_is_full_complete, self.config)
     }
 
     /// Undoes the most recent physical key and recomputes the tone target when appropriate.

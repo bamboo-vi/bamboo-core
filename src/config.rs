@@ -95,6 +95,11 @@ pub struct Config {
     ///
     /// Default: `true`.
     pub extended_onsets: bool,
+    /// If `true`, `g`, `k`, `nk` and `h` are valid finals, read as `ng`, `c`, `nh` and `nh`
+    /// (`nhữg`, `khók`, `mìnk`). English words ending in them may change, e.g. `book` -> `bôk`.
+    ///
+    /// Default: `false`.
+    pub extended_finals: bool,
 }
 
 impl Default for Config {
@@ -106,6 +111,7 @@ impl Default for Config {
             w2u_mode: W2uMode::Disabled,
             bracket_mode: BracketMode::Disabled,
             extended_onsets: true,
+            extended_finals: false,
         }
     }
 }
@@ -120,6 +126,7 @@ impl Config {
             w2u_mode: W2uMode::Disabled,
             bracket_mode: BracketMode::Disabled,
             extended_onsets: true,
+            extended_finals: false,
         }
     }
 
@@ -144,6 +151,7 @@ impl Config {
     /// - Bit 6 (0x40): `bracket_mode` is [`BracketMode::Everywhere`] (wins over bit 5)
     /// - Bit 7 (0x80): `extended_onsets` is off. Flags saved before this bit existed keep
     ///   `f`, `j` and `w` as onsets, as 0.5.5 did.
+    /// - Bit 8 (0x100): `extended_finals` is on
     pub const fn to_flags(self) -> u32 {
         let mut flags = 0;
         if self.free_tone_marking {
@@ -168,6 +176,9 @@ impl Config {
         if !self.extended_onsets {
             flags |= 1 << 7;
         }
+        if self.extended_finals {
+            flags |= 1 << 8;
+        }
         flags
     }
 
@@ -182,6 +193,7 @@ impl Config {
     /// - Bit 6 (0x40): `bracket_mode` is [`BracketMode::Everywhere`] (wins over bit 5)
     /// - Bit 7 (0x80): `extended_onsets` is off. Flags saved before this bit existed keep
     ///   `f`, `j` and `w` as onsets, as 0.5.5 did.
+    /// - Bit 8 (0x100): `extended_finals` is on
     pub const fn from_flags(flags: u32) -> Self {
         Self {
             free_tone_marking: (flags & (1 << 0)) != 0,
@@ -202,6 +214,7 @@ impl Config {
                 BracketMode::Disabled
             },
             extended_onsets: (flags & (1 << 7)) == 0,
+            extended_finals: (flags & (1 << 8)) != 0,
         }
     }
 }
@@ -261,6 +274,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets whether `g`, `k`, `nk` and `h` are valid finals.
+    pub const fn extended_finals(mut self, enabled: bool) -> Self {
+        self.config.extended_finals = enabled;
+        self
+    }
+
     /// Builds and returns the final [`Config`].
     pub const fn build(self) -> Config {
         self.config
@@ -274,11 +293,11 @@ mod tests {
     #[test]
     fn to_flags_from_flags_roundtrip() {
         let configs = [
-            (true, true, true, W2uMode::Disabled, BracketMode::Disabled, true),
-            (false, false, false, W2uMode::NonStart, BracketMode::NonStart, false),
-            (true, false, true, W2uMode::Everywhere, BracketMode::Everywhere, true),
-            (false, true, false, W2uMode::Disabled, BracketMode::NonStart, false),
-            (true, false, false, W2uMode::NonStart, BracketMode::Disabled, false),
+            (true, true, true, W2uMode::Disabled, BracketMode::Disabled, true, false),
+            (false, false, false, W2uMode::NonStart, BracketMode::NonStart, false, true),
+            (true, false, true, W2uMode::Everywhere, BracketMode::Everywhere, true, true),
+            (false, true, false, W2uMode::Disabled, BracketMode::NonStart, false, false),
+            (true, false, false, W2uMode::NonStart, BracketMode::Disabled, false, true),
         ];
         for (
             free_tone_marking,
@@ -287,6 +306,7 @@ mod tests {
             w2u_mode,
             bracket_mode,
             extended_onsets,
+            extended_finals,
         ) in configs
         {
             let original = Config {
@@ -296,6 +316,7 @@ mod tests {
                 w2u_mode,
                 bracket_mode,
                 extended_onsets,
+                extended_finals,
             };
             let flags = original.to_flags();
             let restored = Config::from_flags(flags);
@@ -327,6 +348,7 @@ mod tests {
                 w2u_mode: W2uMode::Disabled,
                 bracket_mode: BracketMode::Disabled,
                 extended_onsets: true,
+                extended_finals: false,
             }
         );
     }
@@ -347,5 +369,13 @@ mod tests {
         // Flags written before the bit existed keep f, j and w, as 0.5.5 did.
         assert!(Config::from_flags(7).extended_onsets);
         assert!(Config::from_flags(0x7f).extended_onsets);
+    }
+
+    #[test]
+    fn extended_finals_flag_bit() {
+        assert_eq!(Config::builder().extended_finals(true).build().to_flags(), 0x107);
+        assert!(Config::from_flags(0x107).extended_finals);
+        // Flags written before the bit existed keep the standard finals.
+        assert!(!Config::from_flags(0xff).extended_finals);
     }
 }
