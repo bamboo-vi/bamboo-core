@@ -112,3 +112,17 @@ fn onsets_and_finals_are_separate() {
     engine.process_str("nhuwgx", Mode::Vietnamese);
     assert_eq!(engine.output(), "nhữg");
 }
+
+#[test]
+fn backspace_keeps_the_tone() {
+    let config = Config::builder().extended_finals(true).build();
+    let mut engine = Engine::with_config(InputMethod::telex(), config);
+    engine.process_str("nhuwgx", Mode::Vietnamese);
+    engine.remove_last_output_char();
+    assert_eq!(engine.output(), "nhữ");
+    engine.reset();
+    engine.process_str("khoks", Mode::Vietnamese);
+    engine.remove_last_output_char();
+    engine.process_key('s', Mode::Vietnamese);
+    assert_eq!(engine.output(), "khos");
+}
