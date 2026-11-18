@@ -29,6 +29,7 @@ impl Engine {
     /// Restores the active last word in the requested representation.
     pub fn restore_last_word_as(&mut self, form: LastWordForm) {
         self.replay_if_pending();
+        self.replayable = self.active_len == 0;
         let mut work = TransformationStack::new();
 
         self.take_active_into(&mut work);
@@ -77,6 +78,10 @@ impl Engine {
                 continue;
             }
             temp_engine.process_key(t.key, Mode::Vietnamese);
+            if !temp_engine.committed_text.is_empty() || !temp_engine.committed_raw.is_empty() {
+                self.set_active_from_stack(&mut work);
+                return;
+            }
         }
         new_comp.extend_from_slice(temp_engine.active_slice());
 

@@ -46,6 +46,7 @@ impl Engine {
         let word = &text[word_start..];
         if build_word(word, std_style, &mut comp) {
             self.set_active_from_stack(&mut comp);
+            self.replayable = self.active_len == 0;
         } else if self.track_committed_text {
             self.committed_text.push_str(word);
             self.committed_raw.push_str(word);

@@ -197,8 +197,114 @@ fn the_next_edit_covers_what_the_change_did() {
     engine.set_config(config(false, true));
     apply(&mut engine, 'j');
     assert_eq!(engine.output(), "jaayj");
-    drop(apply);
     assert_eq!(shown, "jaayj");
+}
+
+#[test]
+fn rebuilt_diacritic_survives_config_change() {
+    let mut engine = new_engine(InputMethod::telex(), true);
+    engine.rebuild_from_text("café");
+    assert_eq!(engine.output(), "café");
+    engine.set_config(config(false, true));
+    engine.process_key(' ', Mode::Vietnamese);
+    assert_eq!(engine.get_processed_str(OutputOptions::FULL_TEXT), "café ");
+}
+
+#[test]
+fn english_aa_survives_config_change() {
+    let mut engine = new_engine(InputMethod::telex(), true);
+    engine.process_str("aa", Mode::English);
+    assert_eq!(engine.output(), "aa");
+    engine.set_config(config(false, true));
+    engine.process_key('b', Mode::English);
+    assert_eq!(engine.output(), "aab");
+}
+
+#[test]
+fn replay_boundary_preserves_host_text() {
+    for tracking in [true, false] {
+        let mut engine = Engine::with_config(
+            InputMethod::telex(),
+            Config::builder()
+                .bracket_mode(bamboo_core::BracketMode::Everywhere)
+                .auto_correct(false)
+                .build(),
+        );
+        engine.set_full_text_tracking(tracking);
+        let mut shown = String::new();
+        for key in "a[".chars() {
+            let edit = engine.process_key_edit(key, Mode::Vietnamese);
+            let keep = shown.chars().count() - edit.delete_chars;
+            shown = shown.chars().take(keep).collect::<String>() + edit.insert;
+        }
+        assert_eq!(shown, "aơ");
+        engine.set_config(Config::builder().auto_correct(false).build());
+        let edit = engine.process_key_edit('b', Mode::Vietnamese);
+        let keep = shown.chars().count() - edit.delete_chars;
+        shown = shown.chars().take(keep).collect::<String>() + edit.insert;
+        assert_eq!(shown, "aơb", "tracking={tracking}");
+        assert_eq!(engine.output(), "aơb", "tracking={tracking}");
+        assert_eq!(engine.committed_text_len(), 0, "tracking={tracking}");
+        assert_eq!(
+            engine.get_processed_str(OutputOptions::FULL_TEXT),
+            "aơb",
+            "tracking={tracking}"
+        );
+        engine.set_config(config(true, false));
+        engine.process_key('c', Mode::Vietnamese);
+        assert_eq!(engine.output(), "aơbc", "tracking={tracking}");
+        assert_eq!(engine.committed_text_len(), 0, "tracking={tracking}");
+    }
+}
+
+#[test]
+fn unsafe_replay_preserves_undo_and_restore() {
+    for tracking in [false, true] {
+        let make_engine = || {
+            let mut e = Engine::with_config(
+                InputMethod::telex(),
+                Config::builder()
+                    .bracket_mode(bamboo_core::BracketMode::Everywhere)
+                    .auto_correct(false)
+                    .build(),
+            );
+            e.set_full_text_tracking(tracking);
+            e.process_str("a[", Mode::Vietnamese);
+            e.set_config(Config::builder().auto_correct(false).build());
+            e
+        };
+        let mut e = make_engine();
+        e.undo_last_key();
+        assert_eq!(e.output(), "a");
+        e.undo_last_key();
+        assert_eq!(e.output(), "");
+
+        let mut e = make_engine();
+        e.restore_last_word_as(LastWordForm::Vietnamese);
+        assert_eq!(e.output(), "aơ");
+        e.undo_last_key();
+        assert_eq!(e.output(), "a");
+    }
+}
+
+#[test]
+fn skipped_replay_discards_stale_syllable_hint() {
+    let mut e = Engine::with_config(InputMethod::telex(), config(true, false));
+    e.rebuild_from_text("j");
+    e.process_str("af", Mode::Vietnamese);
+    e.set_config(config(false, false));
+    e.process_str("wus", Mode::Vietnamese);
+    assert_eq!(e.output(), "jằú");
+}
+
+#[test]
+fn empty_restore_keeps_new_word_replayable() {
+    let mut engine = new_engine(InputMethod::telex(), true);
+    engine.restore_last_word_as(LastWordForm::Vietnamese);
+    engine.process_str("jaay", Mode::Vietnamese);
+    engine.set_config(config(false, true));
+    engine.process_key('j', Mode::Vietnamese);
+    assert_eq!(engine.output(), "jaayj");
 }
 
 #[test]
