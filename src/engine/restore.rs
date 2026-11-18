@@ -28,6 +28,13 @@ impl Engine {
 
     /// Restores the active last word in the requested representation.
     pub fn restore_last_word_as(&mut self, form: LastWordForm) {
+        self.restore_last_word_as_inner(form);
+        // Restore changes the output outside key processing; the next delta
+        // must diff against the restored preedit.
+        self.resync_prev_preedit();
+    }
+
+    fn restore_last_word_as_inner(&mut self, form: LastWordForm) {
         self.replay_if_pending();
         self.replayable = self.active_len == 0;
         let mut work = TransformationStack::new();

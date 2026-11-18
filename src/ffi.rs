@@ -94,6 +94,11 @@ struct ProcessKeyOutput {
 
 /// Applies a key only when the caller has room for every possible edit.
 ///
+/// After a successful call, check [`bamboo_engine_just_committed`]: when it
+/// returns 1 the engine finished the previous preedit as a word (forced word
+/// boundary), so the caller must flush its preedit mirror to the application
+/// before applying this edit.
+///
 /// # Safety
 /// Output pointers must be writable, non-null, aligned, mutually non-overlapping,
 /// and must not point into the engine.
@@ -484,6 +489,24 @@ pub unsafe extern "C" fn bamboo_engine_commit(engine: *mut BambooEngine) {
     }
 }
 
+/// Returns 1 when the most recent `bamboo_engine_process*` call finished the
+/// composition as a forced word boundary (the key did not fit the
+/// transformation buffer).
+///
+/// The whole previous preedit was committed, so hosts that mirror the preedit
+/// must flush it to the application before applying the edit reported by
+/// `bamboo_engine_process_key_buf` (which then deletes nothing and inserts the
+/// whole new preedit). Word-break keys keep their legacy behavior and return 0.
+/// A null engine yields 0.
+///
+/// # Safety
+/// `engine` must be a valid engine pointer when non-null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_just_committed(engine: *const BambooEngine) -> i32 {
+    // SAFETY: the caller supplies a live engine pointer when non-null.
+    i32::from(unsafe { engine.as_ref() }.is_some_and(|e| e.just_committed()))
+}
+
 /// Replaces an engine's configuration using [`Config::from_flags`].
 ///
 /// # Safety
@@ -748,6 +771,31 @@ mod tests {
 
             bamboo_engine_free(engine);
             bamboo_engine_free(ptr::null_mut()); // Freeing null should be a no-op
+        }
+    }
+
+    #[test]
+    fn test_ffi_just_committed_reports_forced_boundary() {
+        let engine = bamboo_engine_new(0); // Telex
+        assert!(!engine.is_null());
+
+        // SAFETY: `engine` was verified non-null and valid.
+        unsafe {
+            for i in 0..32 {
+                let preedit = bamboo_engine_process_key_mode(engine, 'b' as u32, 1);
+                assert!(!preedit.is_null());
+                bamboo_free_string(preedit);
+                assert_eq!(bamboo_engine_just_committed(engine), 0, "key {}", i + 1);
+            }
+            let preedit = bamboo_engine_process_key_mode(engine, 'b' as u32, 1);
+            assert!(!preedit.is_null());
+            bamboo_free_string(preedit);
+            assert_eq!(bamboo_engine_just_committed(engine), 1, "key 33 finishes the word");
+
+            // Null engine safety check (should report no boundary).
+            assert_eq!(bamboo_engine_just_committed(ptr::null()), 0);
+
+            bamboo_engine_free(engine);
         }
     }
 

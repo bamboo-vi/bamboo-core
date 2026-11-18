@@ -31,6 +31,20 @@ pub struct EditDelta<'a> {
     pub delete_bytes: usize,
     /// Replacement suffix to insert after the deletion.
     pub insert: &'a str,
+    /// True when the engine finished the previous preedit as a word during
+    /// this key (forced word boundary: the key did not fit the
+    /// transformation buffer, so the composition was committed and a new
+    /// composition was started with the current key).
+    ///
+    /// The **whole previous preedit** left the preedit: it was appended to
+    /// the committed stream (or discarded when full-text tracking is off —
+    /// the host's own mirror is then the only copy). The host must flush its
+    /// preedit mirror to the application before applying this edit; the edit
+    /// is then relative to the empty preedit, so `delete_chars` and
+    /// `delete_bytes` are `0` and `insert` is the whole new preedit. Without
+    /// this flush the host would render the shrinking preedit as a mass
+    /// deletion of already-committed text.
+    pub committed: bool,
 }
 
 /// The main stateful processor of the Vietnamese Input Method Engine.
@@ -86,6 +100,10 @@ pub struct Engine {
     committed_raw: String,
     prev_preedit: String,
     delta_buf: String,
+    /// Set while processing a key that forced a word boundary (buffer
+    /// overflow); read via [`Engine::just_committed`] and
+    /// [`EditDelta::committed`], cleared at the start of every key.
+    just_committed: bool,
     /// Lazily-allocated side buffer for snapshots whose composition is not in
     /// the DFA (English bypass / fallback). Only written when needed.
     bypass_buffers: Option<Box<[[Transformation; MAX_ACTIVE_TRANS]; MAX_ACTIVE_TRANS]>>,
@@ -141,6 +159,7 @@ impl Engine {
 
             prev_preedit: String::with_capacity(32),
             delta_buf: String::with_capacity(32),
+            just_committed: false,
             dfa: crate::dfa::Dfa::new(),
             current_state_id: 0,
 
@@ -498,7 +517,7 @@ impl Engine {
         composition: &mut TransformationStack,
         key: char,
         is_upper_case: bool,
-    ) -> (bool, bool) {
+    ) -> (bool, bool, bool) {
         let lower_key = lower(key);
         let rules = self.get_applicable_rules(lower_key);
         let mut trans_buf = TransformationStack::new();
@@ -587,7 +606,11 @@ impl Engine {
                     && t.result == lower_key
             });
 
+        // A truncating extend would silently drop transformation slots, so
+        // report it: the caller turns it into a word boundary instead.
+        let before = composition.len();
         composition.extend_from_slice(trans_buf.as_slice());
+        let overflowed = composition.len() - before < trans_buf.len();
         if self.config.free_tone_marking {
             // `check_validity` hands back the tone-check breakdown so the
             // refresh below reuses a single `extract_cvc_trans` per keystroke.
@@ -601,7 +624,7 @@ impl Engine {
                 );
             }
         }
-        (has_undo, refused_effect_key)
+        (has_undo, refused_effect_key, overflowed)
     }
 
     /// Spreads a horn mark across a `uơ`/`ưo` + letter tail when the input
@@ -644,13 +667,19 @@ impl Engine {
         }
     }
 
+    /// Applies `key` to `composition`, regenerating the last syllable in place.
+    ///
+    /// Returns `(has_undo, refused_effect_key, overflowed)`: `overflowed` is
+    /// true when the key's transformations did not fit
+    /// [`MAX_ACTIVE_TRANS`] slots and were truncated. Callers must then treat
+    /// the key as a word boundary and retry it on a fresh composition.
     fn new_composition_in_place(
         &mut self,
         composition: &mut TransformationStack,
         scratch: &mut TransformationStack,
         key: char,
         is_upper_case: bool,
-    ) -> (bool, bool) {
+    ) -> (bool, bool, bool) {
         // Stack-bounded: target indices below truncate into `u8`.
         debug_assert!(composition.len() <= MAX_ACTIVE_TRANS);
         let (syllable_abs_start, hint) = crate::syllable::last_syllable_start(
@@ -671,7 +700,7 @@ impl Engine {
             }
         }
 
-        let (has_undo, refused_effect_key) =
+        let (has_undo, refused_effect_key, inner_overflow) =
             self.generate_transformations(scratch, key, is_upper_case);
 
         if offset != 0 {
@@ -682,8 +711,10 @@ impl Engine {
             }
         }
 
+        let before = composition.len();
         composition.extend_from_slice(scratch.as_slice());
-        (has_undo, refused_effect_key)
+        let overflowed = inner_overflow || composition.len() - before < scratch.len();
+        (has_undo, refused_effect_key, overflowed)
     }
     /// Processes a string of characters and returns the resulting active word.
     ///
@@ -794,6 +825,17 @@ impl Engine {
     pub fn process_key_edit(&mut self, key: char, mode: Mode) -> EditDelta<'_> {
         self.process_key(key, mode);
 
+        if self.just_committed {
+            // Forced word boundary: the engine committed the whole previous
+            // preedit, so the host flushes it and this edit is relative to an
+            // empty preedit.
+            self.delta_buf.clear();
+            self.delta_buf.push_str(&self.cached_output);
+            std::mem::swap(&mut self.prev_preedit, &mut self.delta_buf);
+            let insert = self.prev_preedit.as_str();
+            return EditDelta { delete_chars: 0, delete_bytes: 0, insert, committed: true };
+        }
+
         let lcp_bytes = Self::lcp_bytes(&self.prev_preedit, &self.cached_output);
 
         let prev_bytes = self.prev_preedit.len();
@@ -810,6 +852,7 @@ impl Engine {
             delete_chars: backspace_count,
             delete_bytes: backspaces_bytes,
             insert: inserted_suffix,
+            committed: false,
         }
     }
 
@@ -828,6 +871,11 @@ impl Engine {
     ///
     /// # Returns
     /// `backspace_count` — number of characters to delete from the end of the previous preedit.
+    ///
+    /// The return value cannot express a forced word boundary
+    /// ([`EditDelta::committed`]); callers must query
+    /// [`Engine::just_committed`] after each call and flush their preedit
+    /// before applying the returned edit, or use [`Self::process_key_edit`].
     #[must_use]
     pub fn process_key_edit_into(&mut self, key: char, mode: Mode, inserted: &mut String) -> usize {
         let edit = self.process_key_edit(key, mode);
@@ -837,6 +885,9 @@ impl Engine {
     }
 
     /// Processes one key into a caller-provided insertion buffer using the legacy name.
+    ///
+    /// Like [`Self::process_key_edit_into`], the tuple cannot express a forced
+    /// word boundary; query [`Engine::just_committed`] after each call.
     #[deprecated(
         since = "0.5.0",
         note = "use process_key_edit_into() instead; planned removal in 1.0.0"
@@ -863,6 +914,7 @@ impl Engine {
         if self.replay_pending {
             self.replay_if_pending();
         }
+        self.just_committed = false;
         if !self.process_key_internal(key, mode) {
             self.update_cached_output();
         }
@@ -907,12 +959,6 @@ impl Engine {
     /// [`TransformationStack`]s.
     #[inline(never)]
     fn process_key_slow(&mut self, lower_key: char, is_upper_case: bool) {
-        // Snapshot only needed before slow-path mutations (new_composition_in_place).
-        // Window full: silently commit the head first so no key is ever dropped
-        // (TransformationStack::push would discard past MAX_ACTIVE_TRANS).
-        if self.active_len >= MAX_ACTIVE_TRANS {
-            self.commit();
-        }
         self.push_snapshot();
 
         // The JIT edge cur--key-->next below is only sound when `cur`
@@ -921,7 +967,7 @@ impl Engine {
         // non-ASCII / English residue, retargeted tone — must not link edges
         // (e.g. a word-start edge must never point at a mid-word composition).
         // Slow path only: one memcmp over <=32 transformations.
-        let prefix_known = if self.active_len == 0 {
+        let mut prefix_known = if self.active_len == 0 {
             // Word start: only state 0 identifies empty text.
             self.current_state_id == 0
         } else {
@@ -933,15 +979,18 @@ impl Engine {
         };
 
         // Local scratch stacks: the previous persisted copies were never
-        // read (every use clears first via `take_active_into`/`drain_to`),
-        // so keeping them as `Engine` fields only cost 528 B of footprint.
+        // read (every use clears first via `drain_to`), so keeping them as
+        // `Engine` fields only cost 528 B of footprint.
         let mut work = TransformationStack::new();
         let mut scratch = TransformationStack::new();
 
-        self.take_active_into(&mut work);
+        // Copy instead of `take_active_into`: when the key needs more slots
+        // than remain, the forced word boundary below commits the pre-key
+        // composition straight from `active_buffer`.
+        work.extend_from_slice(self.active_slice());
         // Spell-check the pre-key word only for keys that could be a mark; the
         // check is wasted work for every other keystroke.
-        let valid_word_before_effect_key = self.config.auto_correct
+        let mut valid_word_before_effect_key = self.config.auto_correct
             && self.is_input_method_key(lower_key)
             && (!lower_key.is_alphabetic()
                 || (self.is_tone_key(lower_key)
@@ -950,8 +999,30 @@ impl Engine {
                         .iter()
                         .any(|t| t.effect_type == EffectType::ToneTransformation)))
             && self.is_valid_internal(work.as_slice(), true);
-        let (has_undo, refused_effect_key) =
+        let (mut has_undo, mut refused_effect_key, overflowed) =
             self.new_composition_in_place(&mut work, &mut scratch, lower_key, is_upper_case);
+        if overflowed {
+            // Forced word boundary (issue #41): the key's transformations do
+            // not fit MAX_ACTIVE_TRANS slots. Finish the composition as a
+            // word and start a new composition with the current key, instead
+            // of silently resetting or truncating the composition.
+            self.commit_active();
+            self.just_committed = true;
+            // The replayed key must stay undoable within the new word.
+            self.push_snapshot();
+            work.clear();
+            let (h, r, o) =
+                self.new_composition_in_place(&mut work, &mut scratch, lower_key, is_upper_case);
+            debug_assert!(!o, "a single key must fit a fresh composition");
+            has_undo = h;
+            refused_effect_key = r;
+            // The pre-key word is committed; `preserve_valid_word` must not
+            // protect it across the boundary.
+            valid_word_before_effect_key = false;
+            // The boundary committed the pre-key composition; the replayed
+            // key starts from the empty composition at state 0.
+            prefix_known = self.current_state_id == 0;
+        }
         if has_undo {
             // Only lock into english bypass if the result of the undo is NOT a valid Vietnamese prefix.
             // This allows words like "thoòng" (typed as "thooongf") to continue receiving tones
@@ -993,7 +1064,11 @@ impl Engine {
             return;
         }
         if self.active_len >= MAX_ACTIVE_TRANS {
-            self.commit();
+            // Forced word boundary: no room for one more raw slot. Signal it
+            // so hosts commit the preedit instead of reading the shrink as a
+            // mass deletion (issue #41).
+            self.commit_active();
+            self.just_committed = true;
         }
         if mode != Mode::English && self.active_len > 0 {
             self.push_snapshot();
@@ -1008,7 +1083,7 @@ impl Engine {
             crate::syllable::new_appending_trans(lower_key, is_upper_case);
         self.active_len += 1;
         // Pure append: the preedit grows by exactly one cased char.
-        // Any `commit()` above already cleared `cached_output`.
+        // Any `commit_active()` above already cleared `cached_output`.
         self.cached_output.push(if is_upper_case { upper(lower_key) } else { lower_key });
         self.current_state_id = 0;
     }
@@ -1068,12 +1143,13 @@ impl Engine {
 
     /// Commits the active word, then appends a word-break character straight
     /// to the committed buffers. A break char flattens to itself, so this
-    /// skips the second `commit()` (flatten + DFA lookup) paid by the generic
-    /// one-char-active path.
+    /// skips the second `commit_active()` (flatten + DFA lookup) paid by the
+    /// generic one-char-active path.
     fn commit_word_break(&mut self, cased: char) {
-        self.commit();
-        // `commit` early-returns on an empty word; reset the same state anyway
-        // so a break at a word start behaves like committing a one-char word.
+        self.commit_active();
+        // `commit_active` early-returns on an empty word; reset the same state
+        // anyway so a break at a word start behaves like committing a
+        // one-char word.
         self.cached_output.clear();
         self.snapshot_len = 0;
         self.active_upper_mask = 0;
@@ -1195,8 +1271,13 @@ impl Engine {
 
     fn push_active(&mut self, trans: Transformation) {
         if self.active_len >= MAX_ACTIVE_TRANS {
-            // Buffer full, auto-commit to make room
-            self.commit();
+            // Buffer full: finish the composition as a signaled word boundary
+            // to make room (issue #41).
+            self.commit_active();
+            self.just_committed = true;
+            // commit_active clears the snapshot stack; keep the key pushed
+            // below undoable within the new word.
+            self.push_snapshot();
         }
         if trans.is_upper_case {
             self.active_upper_mask |= 1u32 << self.active_len;
@@ -1207,7 +1288,23 @@ impl Engine {
     }
 
     /// Clears the active syllable buffer and appends it to the committed text.
+    ///
+    /// Host-initiated commit: the host should flush its own preedit mirror to
+    /// the application as well, since the next
+    /// [`process_key_edit`](Self::process_key_edit) starts a fresh preedit.
     pub fn commit(&mut self) {
+        self.commit_active();
+        // A host-initiated commit changes the output outside key processing;
+        // the next delta must be computed against the post-commit preedit.
+        self.resync_prev_preedit();
+    }
+
+    /// Commits the active buffer without touching the delta bookkeeping.
+    ///
+    /// Key processing owes one [`EditDelta`] per key, so commits performed
+    /// *during* a key (word breaks, forced word boundaries) must leave
+    /// `prev_preedit` pointing at the pre-key output for the delta.
+    fn commit_active(&mut self) {
         if self.active_len == 0 {
             return;
         }
@@ -1233,6 +1330,15 @@ impl Engine {
         self.dfa_detached = false;
     }
 
+    /// Re-anchors the delta bookkeeping after a mutation outside key
+    /// processing (commit, undo, restore), so the next
+    /// [`process_key_edit`](Self::process_key_edit) diffs against the current
+    /// output instead of a stale preedit.
+    fn resync_prev_preedit(&mut self) {
+        self.prev_preedit.clear();
+        self.prev_preedit.push_str(&self.cached_output);
+    }
+
     /// Returns the currently active syllable as a borrowed string slice.
     ///
     /// This performs **zero heap allocations**, borrowing directly from the engine's internal preedit cache.
@@ -1240,6 +1346,24 @@ impl Engine {
     #[must_use]
     pub fn output_str(&self) -> &str {
         &self.cached_output
+    }
+
+    /// Returns `true` when the most recent [`process_key`](Self::process_key) /
+    /// [`process_key_edit`](Self::process_key_edit) call finished the active
+    /// composition as a forced word boundary (the key did not fit the
+    /// transformation buffer).
+    ///
+    /// The whole previous preedit was committed. Hosts that mirror the
+    /// preedit themselves must flush it to the application and continue with
+    /// [`output_str`](Self::output_str) as the new preedit. Delta-based hosts
+    /// get the same signal from [`EditDelta::committed`].
+    ///
+    /// Word-break keys (space, punctuation) keep their legacy behavior and do
+    /// not set this flag; hosts already recognize them by the key itself.
+    #[inline]
+    #[must_use]
+    pub const fn just_committed(&self) -> bool {
+        self.just_committed
     }
 
     /// Returns the currently active syllable as a string slice or owned string.
@@ -1403,6 +1527,7 @@ impl Engine {
             self.replayable = true;
         }
         self.update_cached_output();
+        self.resync_prev_preedit();
     }
 
     /// Removes the last output character (grapheme) from the active composition,
@@ -1461,6 +1586,7 @@ impl Engine {
             .enumerate()
             .fold(0u32, |m, (i, t)| if t.is_upper_case { m | (1u32 << i) } else { m });
         self.update_cached_output();
+        self.resync_prev_preedit();
     }
 
     /// Resets the engine state, clearing committed and active text.
@@ -1478,6 +1604,7 @@ impl Engine {
         self.replay_pending = false;
         self.replayable = true;
         self.dfa_detached = false;
+        self.just_committed = false;
     }
 
     /// Returns the number of DFA states currently cached.

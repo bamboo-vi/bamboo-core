@@ -99,6 +99,10 @@ int32_t bamboo_engine_process_key_buf(BambooEngine *engine, uint32_t key,
                                       size_t *backspaces_chars, size_t *backspaces_bytes);
 void bamboo_engine_reset(BambooEngine *engine);
 void bamboo_engine_commit(BambooEngine *engine);
+/* Returns 1 when the last process call finished the composition as a forced
+   word boundary (buffer overflow): flush the preedit to the application
+   before applying the edit from bamboo_engine_process_key_buf. */
+int32_t bamboo_engine_just_committed(const BambooEngine *engine);
 void bamboo_engine_set_config_flags(BambooEngine *engine, uint32_t flags);
 void bamboo_engine_set_full_text_tracking(BambooEngine *engine, int32_t enabled);
 uint32_t bamboo_engine_config_flags(const BambooEngine *engine);

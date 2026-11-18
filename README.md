@@ -182,6 +182,16 @@ new      = [common_prefix] + [insert]
 ```
 Frontend does not need to compute LCP — the engine does it.
 
+When `edit.committed` is `true`, the engine finished the previous preedit as a
+word during this key (forced word boundary: the key did not fit the
+transformation buffer). The **whole previous preedit** left the preedit (into
+the committed stream, or discarded when full-text tracking is off); the
+frontend must flush its preedit mirror to the application before applying the
+edit, which is then relative to an empty preedit: `delete_chars` is `0` and
+`insert` is the whole new preedit. Hosts using `process_key`/`output()` get the
+same signal from `Engine::just_committed()`. Word-break keys (space,
+punctuation) keep their legacy deltas and do not set the flag.
+
 ## Backspace
 
 ```rust

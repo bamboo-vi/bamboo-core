@@ -17,19 +17,47 @@ All notable changes to this project will be documented in this file.
   it is typed before or after them. It defaults to `false`; flag bit `0x100`
   (`BAMBOO_CONFIG_EXTENDED_FINALS`) turns it on. With it on, English words ending in these finals
   may change, e.g. `book` -> `bôk`.
+- `EditDelta::committed` and `Engine::just_committed()` signal a forced word boundary to hosts,
+  plus `bamboo_engine_just_committed` in the C API and `BambooWasmEngine::just_committed` for WASM.
+  When the transformation buffer fills up mid-word (32 slots, counted in transformation slots — a
+  mark or tone key spends more than one), the engine now finishes the composition as a word and
+  starts a new composition with the current key, telling the host to commit the previous preedit
+  instead of silently resetting it. Delta-based hosts previously rendered the reset as a mass
+  deletion of already-committed text (issue #41).
 
 ### Changed
 
 - After `set_config` changes the config mid-word, the next key, undo, backspace or restore works
   as if an engine with the new config had typed the keys of the active composition in Vietnamese
-  mode; the output does not change before that. Undo right after a config change used to do
-  nothing, and a word that had entered English bypass stayed in it.
+  mode; the output does not change before that. A composition that cannot be replayed faithfully
+  — built by `rebuild_from_text`, containing English-mode keys, or whose replay would commit
+  mid-word — stays as it is instead. Undo right after a config change used to do nothing, and a
+  word that had entered English bypass stayed in it.
+- The engine now attempts the key before committing. The boundary happens only when the key's
+  transformations do not fit the remaining slots (e.g. a two-slot key at 31 slots); the old code
+  committed as soon as the buffer already held 32 slots.
 
 ### Breaking
 
 - `Config` has new public fields, so code that builds it with a struct literal listing every
   field no longer compiles. Add `..Default::default()` or use `Config::builder()`. Planned for
   0.6.0.
+- `EditDelta` gained the `committed` field: code constructing `EditDelta` literally must add it.
+
+### Fixed
+
+- A key needing more transformation slots than remain in the buffer (e.g. a two-slot mark key at
+  31 slots) no longer drops transformations silently; it triggers the same word boundary.
+- `process_key_edit` deltas after `commit`, `undo_last_key`, `remove_last_output_char`,
+  `restore_last_word_as`, or `rebuild_from_text` now diff against the current preedit instead of a
+  stale one, so hosts no longer delete text they should keep.
+- `reset()` now clears the `just_committed` signal.
+
+### Notes
+
+- `process_key_edit_into`, the deprecated `process_key_delta_into`, and the deprecated
+  `process_key_delta` tuple API cannot express the forced-word-boundary signal; hosts on those
+  APIs must query `Engine::just_committed()` after each call or migrate to `process_key_edit`.
 
 ## [0.5.5] - 2026-11-12
 

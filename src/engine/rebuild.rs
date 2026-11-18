@@ -52,6 +52,7 @@ impl Engine {
             self.committed_raw.push_str(word);
         }
         self.update_cached_output();
+        self.resync_prev_preedit();
     }
 }
 

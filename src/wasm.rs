@@ -48,4 +48,18 @@ impl BambooWasmEngine {
     pub fn output(&self) -> String {
         self.inner.output().into_owned()
     }
+
+    /// Returns `true` when the most recent [`process_key`](Self::process_key)
+    /// call finished the composition as a forced word boundary (the key did
+    /// not fit the transformation buffer).
+    ///
+    /// The whole previous preedit was committed, so hosts must flush it to
+    /// the application before continuing with [`output`](Self::output) as the
+    /// new preedit.
+    // wasm_bindgen rejects `const fn`; the inner call is a const fn but this
+    // exported wrapper cannot be one.
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn just_committed(&self) -> bool {
+        self.inner.just_committed()
+    }
 }
