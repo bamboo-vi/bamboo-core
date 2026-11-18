@@ -31,8 +31,10 @@ All notable changes to this project will be documented in this file.
   as if an engine with the new config had typed the keys of the active composition in Vietnamese
   mode; the output does not change before that. A composition that cannot be replayed faithfully
   — built by `rebuild_from_text`, containing English-mode keys, or whose replay would commit
-  mid-word — stays as it is instead. Undo right after a config change used to do nothing, and a
-  word that had entered English bypass stayed in it.
+  mid-word — stays as it is instead, and so does one whose next key ends the word (word break or
+  forced boundary), because the host builds that text from the preedit it shows. Undo right
+  after a config change used to do nothing, and a word that had entered English bypass stayed
+  in it.
 - The engine now attempts the key before committing. The boundary happens only when the key's
   transformations do not fit the remaining slots (e.g. a two-slot key at 31 slots); the old code
   committed as soon as the buffer already held 32 slots.

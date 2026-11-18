@@ -332,6 +332,63 @@ fn a_second_change_retapes_with_the_latest_config() {
     assert_eq!(engine.output(), "jậy");
 }
 
+/// Simulates the delta-based host from the README: `app` is the committed application text
+/// and `mirror` the preedit the host keeps from [`Engine::process_key_edit`].
+fn host_key(app: &mut String, mirror: &mut String, engine: &mut Engine, key: char) {
+    let shown = mirror.clone();
+    let edit = engine.process_key_edit(key, Mode::Vietnamese);
+    if edit.committed {
+        // Forced boundary: the host flushes the mirror it shows and starts a fresh preedit.
+        app.push_str(&shown);
+        mirror.clear();
+        mirror.push_str(edit.insert);
+        return;
+    }
+    let keep = mirror.chars().count() - edit.delete_chars;
+    *mirror = mirror.chars().take(keep).collect::<String>() + edit.insert;
+    if key == ' ' {
+        // Word break: the host commits its mirror plus the key itself.
+        app.push_str(&shown);
+        app.push(key);
+        mirror.clear();
+    }
+}
+
+#[test]
+fn a_word_break_commits_the_preedit_the_host_shows() {
+    // The key after the change ends the word, so the host commits the preedit it shows and
+    // the composition is kept as it is instead of being re-typed (see `set_config`).
+    let mut engine = new_engine(InputMethod::telex(), true);
+    let (mut app, mut mirror) = (String::new(), String::new());
+    for key in "jaay".chars() {
+        host_key(&mut app, &mut mirror, &mut engine, key);
+    }
+    assert_eq!(mirror, "jây");
+    engine.set_config(config(false, true));
+    host_key(&mut app, &mut mirror, &mut engine, ' ');
+    assert_eq!(format!("{app}{mirror}"), engine.get_processed_str(OutputOptions::FULL_TEXT));
+    assert_eq!(engine.get_processed_str(OutputOptions::FULL_TEXT), "jây ");
+}
+
+#[test]
+fn a_forced_boundary_commits_the_preedit_the_host_shows() {
+    let w2u = |mode| Config { w2u_mode: mode, auto_correct: false, ..Config::default() };
+    for on in [true, false] {
+        let mut engine = Engine::with_config(
+            InputMethod::telex(),
+            w2u(if on { W2uMode::Everywhere } else { W2uMode::Disabled }),
+        );
+        let (mut app, mut mirror) = (String::new(), String::new());
+        for key in format!("{}w", "b".repeat(31)).chars() {
+            host_key(&mut app, &mut mirror, &mut engine, key);
+        }
+        engine.set_config(w2u(if on { W2uMode::Disabled } else { W2uMode::Everywhere }));
+        // The 33rd slot does not fit: the word ends as a signaled boundary.
+        host_key(&mut app, &mut mirror, &mut engine, 'z');
+        assert_eq!(format!("{app}{mirror}"), engine.get_processed_str(OutputOptions::FULL_TEXT));
+    }
+}
+
 #[test]
 fn undo_and_restore_after_a_change() {
     let mut engine = new_engine(InputMethod::telex(), true);

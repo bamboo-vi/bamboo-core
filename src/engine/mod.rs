@@ -329,9 +329,11 @@ impl Engine {
     /// Updates the engine configuration.
     ///
     /// The output does not change until the next key, undo or restore. That edit then works as
-    /// if an engine with the new config had typed the active Vietnamese keys. Compositions
-    /// with unknown or mixed provenance, or whose replay would commit, are kept unchanged.
-    /// Committed text is left as it is.
+    /// if an engine with the new config had typed the active Vietnamese keys. Compositions with
+    /// unknown or mixed provenance, or whose replay would commit, are kept unchanged. A key
+    /// that ends the word (word break or forced boundary) also commits the composition as it
+    /// is, because the host builds that text from the preedit it shows. Committed text is left
+    /// as it is.
     pub fn set_config(&mut self, config: Config) {
         if config == self.config {
             return;
@@ -365,16 +367,12 @@ impl Engine {
         }
     }
 
-    /// Re-types the active keys after a config change, so hint, bypass and undo state all come
-    /// from the new config. Falls back to keeping the composition unchanged when it cannot be
-    /// replayed faithfully: raw keys unknown (rebuilt text) or not all Vietnamese (English
-    /// mode), or a replay that would commit mid-word.
+    /// Re-types the active keys after a config change in a fresh engine, so hint, bypass and
+    /// undo state all come from the new config. Returns `None` and keeps the composition
+    /// unchanged when the keys cannot be replayed faithfully: raw keys unknown (rebuilt text)
+    /// or not all Vietnamese (English mode), or a replay that would commit mid-word.
     #[cold]
-    pub(crate) fn replay_if_pending(&mut self) {
-        if !self.replay_pending {
-            return;
-        }
-        self.replay_pending = false;
+    fn replayed(&mut self) -> Option<Engine> {
         let mut replay = Self::with_shared_rules(
             Arc::clone(&self.input_method),
             Arc::clone(&self.rules),
@@ -386,9 +384,15 @@ impl Engine {
             if !replay.committed_text.is_empty() || !replay.committed_raw.is_empty() {
                 self.replayable = false;
                 self.syll_hint = crate::syllable::SyllHint::NONE;
-                return;
+                return None;
             }
         }
+        Some(replay)
+    }
+
+    /// Moves the re-typed state of `replay` in. Committed history and the preedit bookkeeping
+    /// that hosts diff against stay with `self`.
+    fn adopt(&mut self, replay: Engine) {
         self.active_buffer = replay.active_buffer;
         self.active_len = replay.active_len;
         self.active_upper_mask = replay.active_upper_mask;
@@ -401,6 +405,22 @@ impl Engine {
         self.dfa_detached = replay.dfa_detached;
         self.syll_hint = replay.syll_hint;
         self.dfa = replay.dfa;
+        self.replayable = replay.replayable;
+        self.just_committed = replay.just_committed;
+    }
+
+    /// Re-types the active keys after a config change, so hint, bypass and undo state all come
+    /// from the new config. Falls back to keeping the composition unchanged when it cannot be
+    /// replayed faithfully; see [`Self::replayed`].
+    #[cold]
+    pub(crate) fn replay_if_pending(&mut self) {
+        if !self.replay_pending {
+            return;
+        }
+        self.replay_pending = false;
+        if let Some(replay) = self.replayed() {
+            self.adopt(replay);
+        }
     }
 
     /// Controls whether committed text is retained for `FULL_TEXT` output.
@@ -912,7 +932,22 @@ impl Engine {
     /// (e.g. `ass` → `as`).
     pub fn process_key(&mut self, key: char, mode: Mode) {
         if self.replay_pending {
-            self.replay_if_pending();
+            self.replay_pending = false;
+            if let Some(mut replay) = self.replayed() {
+                replay.process_key(key, mode);
+                // A key that ends the word hands the host text built from the preedit it shows
+                // (word break) or from its mirror (forced boundary), and that flush cannot
+                // carry the replay's correction. Such keys commit the composition as it is;
+                // see `set_config`.
+                if replay.committed_text.is_empty()
+                    && replay.committed_raw.is_empty()
+                    && !replay.just_committed
+                {
+                    self.adopt(replay);
+                    return;
+                }
+                self.syll_hint = crate::syllable::SyllHint::NONE;
+            }
         }
         self.just_committed = false;
         if !self.process_key_internal(key, mode) {
