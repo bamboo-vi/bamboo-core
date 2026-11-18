@@ -1,4 +1,4 @@
-use bamboo_core::{Config, Engine, InputMethod, LastWordForm, Mode, OutputOptions};
+use bamboo_core::{Config, Engine, InputMethod, LastWordForm, Mode, OutputOptions, W2uMode};
 
 fn config(extended_onsets: bool, auto_correct: bool) -> Config {
     Config::builder().extended_onsets(extended_onsets).auto_correct(auto_correct).build()
@@ -138,33 +138,110 @@ fn raw_keys_survive_either_way() {
     }
 }
 
+/// Types `before`, turns the setting `now_on`, types `rest`. Also returns what an engine with
+/// the new setting from the start gives for all the keys.
+fn switched(
+    im: fn() -> InputMethod,
+    auto_correct: bool,
+    before: &str,
+    now_on: bool,
+    rest: &str,
+) -> (String, String) {
+    let mut engine = Engine::with_config(im(), config(!now_on, auto_correct));
+    engine.process_str(before, Mode::Vietnamese);
+    engine.set_config(config(now_on, auto_correct));
+    engine.process_str(rest, Mode::Vietnamese);
+    let mut fresh = Engine::with_config(im(), config(now_on, auto_correct));
+    fresh.process_str(&format!("{before}{rest}"), Mode::Vietnamese);
+    (engine.output().into_owned(), fresh.output().into_owned())
+}
+
 #[test]
-fn a_change_applies_from_the_next_key() {
-    assert_eq!(typed(false, "+jaayj"), "jậy");
-    assert_eq!(typed(true, "-jaayj"), "jaayj");
-    // The tone key comes after the change, so the new setting decides it.
-    assert_eq!(typed(true, "jaay-j"), "jaayj");
-    // Keys typed while off stay raw, so turning it on later has nothing to mark.
-    assert_eq!(typed(false, "jaay+j"), "jaayj");
-    // A tone already placed stays.
+fn a_change_mid_word_retypes_the_word() {
+    for (im, auto_correct, before, now_on, rest, want) in [
+        (InputMethod::telex as fn() -> InputMethod, true, "jaay", false, "j", "jaayj"),
+        (InputMethod::telex, true, "jaay", true, "j", "jậy"),
+        (InputMethod::telex, true, "fofa", false, "f", "fofaf"),
+        (InputMethod::telex, false, "fac", false, "s", "fác"),
+        (InputMethod::telex, false, "fac", true, "s", "fác"),
+        (InputMethod::telex, true, "juss", false, "ive", "jussive"),
+        (InputMethod::telex, true, "juss", true, "ive", "jusive"),
+        (InputMethod::vni, true, "ja6", false, "5", "ja65"),
+        (InputMethod::vni, true, "ja6", true, "5", "jậ"),
+        (InputMethod::vni, false, "fo", false, "1a", "fóa"),
+    ] {
+        let (got, fresh) = switched(im, auto_correct, before, now_on, rest);
+        assert_eq!(got, want, "{before}|{rest} now_on={now_on} auto_correct={auto_correct}");
+        assert_eq!(got, fresh, "{before}|{rest}");
+    }
+}
+
+#[test]
+fn the_output_waits_for_the_next_key() {
     assert_eq!(typed(true, "jaayj-"), "jậy");
+    assert_eq!(typed(false, "jaayj+"), "jaayj");
 }
 
 #[test]
-fn a_change_mid_word_matches_typing_with_the_new_setting() {
-    // After turning it off, the next key sees the word as invalid, as if typed with it off.
-    assert_eq!(typed(true, "fofa-f"), typed(false, "fofaf"));
-    assert_eq!(typed(true, "fofa-f"), "fofaf");
-    assert_eq!(typed(true, "jajo-j"), "jajoj");
+fn the_next_edit_covers_what_the_change_did() {
+    let mut engine = new_engine(InputMethod::telex(), true);
+    let mut shown = String::new();
+    let mut apply = |engine: &mut Engine, key: char| {
+        let edit = engine.process_key_edit(key, Mode::Vietnamese);
+        let keep = shown.chars().count() - edit.delete_chars;
+        shown = shown.chars().take(keep).collect::<String>() + edit.insert;
+    };
+    for key in "jaay".chars() {
+        apply(&mut engine, key);
+    }
+    engine.set_config(config(false, true));
+    apply(&mut engine, 'j');
+    assert_eq!(engine.output(), "jaayj");
+    drop(apply);
+    assert_eq!(shown, "jaayj");
 }
 
 #[test]
-fn a_change_after_english_bypass() {
-    // The doubled `s` undid the tone before the change, so the word keeps one `s`.
-    assert_eq!(typed(true, "juss-ive"), "jusive");
-    assert_eq!(typed(true, "juss-ive!"), "jussive");
-    // Off from the start, the word never took a tone.
-    assert_eq!(typed(false, "juss+ive"), "jussive");
+fn undo_and_restore_after_a_change() {
+    let mut engine = new_engine(InputMethod::telex(), true);
+    engine.process_str("jaayj", Mode::Vietnamese);
+    engine.set_config(config(false, true));
+    engine.undo_last_key();
+    assert_eq!(engine.output(), "jaay");
+
+    let mut engine = new_engine(InputMethod::telex(), false);
+    engine.process_str("jaa", Mode::Vietnamese);
+    engine.set_config(config(true, true));
+    engine.restore_last_word_as(LastWordForm::Vietnamese);
+    assert_eq!(engine.output(), "jâ");
+    engine.process_key('s', Mode::Vietnamese);
+    assert_eq!(engine.output(), "jấ");
+    assert_eq!(engine.get_processed_str(OutputOptions::RAW), "jaas");
+}
+
+#[test]
+fn committed_text_stays_as_typed() {
+    for tracking in [true, false] {
+        let mut engine = new_engine(InputMethod::telex(), true);
+        engine.set_full_text_tracking(tracking);
+        engine.process_str("jaayj ja", Mode::Vietnamese);
+        engine.set_config(config(false, true));
+        engine.process_key('a', Mode::Vietnamese);
+        let want = if tracking { "jậy jaa" } else { "jaa" };
+        assert_eq!(engine.get_processed_str(OutputOptions::FULL_TEXT), want);
+    }
+}
+
+#[test]
+fn any_config_change_retypes_the_word() {
+    let w2u = |mode| Config { w2u_mode: mode, ..Config::default() };
+    let mut engine = Engine::with_config(InputMethod::telex(), w2u(W2uMode::Disabled));
+    engine.process_str("bw", Mode::Vietnamese);
+    engine.set_config(w2u(W2uMode::Everywhere));
+    engine.process_key('a', Mode::Vietnamese);
+    let mut fresh = Engine::with_config(InputMethod::telex(), w2u(W2uMode::Everywhere));
+    fresh.process_str("bwa", Mode::Vietnamese);
+    assert_eq!(engine.output(), fresh.output());
 }
 
 #[test]

@@ -18,6 +18,13 @@ All notable changes to this project will be documented in this file.
   (`BAMBOO_CONFIG_EXTENDED_FINALS`) turns it on. With it on, English words ending in these finals
   may change, e.g. `book` -> `bôk`.
 
+### Changed
+
+- After `set_config` changes the config mid-word, the next key, undo, backspace or restore works
+  as if an engine with the new config had typed the keys of the active composition in Vietnamese
+  mode; the output does not change before that. Undo right after a config change used to do
+  nothing, and a word that had entered English bypass stayed in it.
+
 ### Breaking
 
 - `Config` has new public fields, so code that builds it with a struct literal listing every
