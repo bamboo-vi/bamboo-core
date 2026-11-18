@@ -308,6 +308,31 @@ fn empty_restore_keeps_new_word_replayable() {
 }
 
 #[test]
+fn uppercase_keys_retype_the_word() {
+    let mut engine = new_engine(InputMethod::telex(), true);
+    engine.process_str("JAAY", Mode::Vietnamese);
+    engine.set_config(config(false, true));
+    engine.process_key('J', Mode::Vietnamese);
+    assert_eq!(engine.output(), "JAAYJ");
+
+    let mut engine = new_engine(InputMethod::telex(), true);
+    engine.process_str("Jaay", Mode::Vietnamese);
+    engine.set_config(config(false, true));
+    engine.process_key('j', Mode::Vietnamese);
+    assert_eq!(engine.output(), "Jaayj");
+}
+
+#[test]
+fn a_second_change_retapes_with_the_latest_config() {
+    let mut engine = new_engine(InputMethod::telex(), true);
+    engine.process_str("jaay", Mode::Vietnamese);
+    engine.set_config(config(false, true));
+    engine.set_config(config(true, true));
+    engine.process_key('j', Mode::Vietnamese);
+    assert_eq!(engine.output(), "jậy");
+}
+
+#[test]
 fn undo_and_restore_after_a_change() {
     let mut engine = new_engine(InputMethod::telex(), true);
     engine.process_str("jaayj", Mode::Vietnamese);

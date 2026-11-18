@@ -347,7 +347,9 @@ impl Engine {
     }
 
     /// Re-types the active keys after a config change, so hint, bypass and undo state all come
-    /// from the new config.
+    /// from the new config. Falls back to keeping the composition unchanged when it cannot be
+    /// replayed faithfully: raw keys unknown (rebuilt text) or not all Vietnamese (English
+    /// mode), or a replay that would commit mid-word.
     #[cold]
     pub(crate) fn replay_if_pending(&mut self) {
         if !self.replay_pending {
