@@ -28,6 +28,7 @@ impl Engine {
 
     /// Restores the active last word in the requested representation.
     pub fn restore_last_word_as(&mut self, form: LastWordForm) {
+        self.replay_if_pending();
         let mut work = TransformationStack::new();
 
         self.take_active_into(&mut work);

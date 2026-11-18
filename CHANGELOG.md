@@ -13,6 +13,13 @@ All notable changes to this project will be documented in this file.
 - Config flag bit `0x80` (`BAMBOO_CONFIG_NO_EXTENDED_ONSETS` in the C header) turns it off. Flags
   saved before this release lack the bit and keep the 0.5.5 behavior.
 
+### Changed
+
+- After `set_config` changes the config mid-word, the next key, undo, backspace or restore works
+  as if an engine with the new config had typed the keys of the active composition in Vietnamese
+  mode; the output does not change before that. Undo right after a config change used to do
+  nothing, and a word that had entered English bypass stayed in it.
+
 ### Breaking
 
 - `Config` has a new public field, so code that builds it with a struct literal listing every

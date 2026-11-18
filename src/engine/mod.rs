@@ -56,6 +56,8 @@ pub struct Engine {
     snapshot_len: usize,
     current_state_id: u32,
     english_bypass: bool,
+    /// Set by a config change mid-word: the next edit first re-types the active keys.
+    replay_pending: bool,
     track_committed_text: bool,
     /// True once the DFA refused a new composition (frozen at
     /// [`crate::dfa::DFA_MAX_STATES`]).
@@ -146,6 +148,7 @@ impl Engine {
             scratch_engine: None,
             syll_hint: crate::syllable::SyllHint::NONE,
             english_bypass: false,
+            replay_pending: false,
             dfa_detached: false,
         }
     }
@@ -302,6 +305,10 @@ impl Engine {
     }
 
     /// Updates the engine configuration.
+    ///
+    /// The output does not change until the next key, undo or restore. That edit then works as
+    /// if an engine with the new config had typed the keys of the active composition in
+    /// [`Mode::Vietnamese`]; committed text is left as it is.
     pub fn set_config(&mut self, config: Config) {
         if config == self.config {
             return;
@@ -313,6 +320,34 @@ impl Engine {
         self.dfa_detached = false;
         self.snapshot_len = 0;
         self.scratch_engine = None;
+        self.replay_pending = self.active_len > 0;
+    }
+
+    /// Re-types the active keys after a config change, so hint, bypass and undo state all come
+    /// from the new config.
+    #[cold]
+    pub(crate) fn replay_if_pending(&mut self) {
+        if !self.replay_pending {
+            return;
+        }
+        self.replay_pending = false;
+        let mut keys = ['\0'; MAX_ACTIVE_TRANS];
+        let mut len = 0;
+        for t in self.active_slice().iter().filter(|t| t.key != '\0') {
+            keys[len] = if t.is_upper_case { upper(t.key) } else { t.key };
+            len += 1;
+        }
+        self.cached_output.clear();
+        self.active_len = 0;
+        self.active_upper_mask = 0;
+        self.current_state_id = 0;
+        self.snapshot_len = 0;
+        self.english_bypass = false;
+        self.dfa_detached = false;
+        self.syll_hint = crate::syllable::SyllHint::NONE;
+        for &key in &keys[..len] {
+            self.process_key(key, Mode::Vietnamese);
+        }
     }
 
     /// Controls whether committed text is retained for `FULL_TEXT` output.
@@ -794,6 +829,9 @@ impl Engine {
     /// in a row undoes the tone and types the key as a literal letter
     /// (e.g. `ass` → `as`).
     pub fn process_key(&mut self, key: char, mode: Mode) {
+        if self.replay_pending {
+            self.replay_if_pending();
+        }
         if !self.process_key_internal(key, mode) {
             self.update_cached_output();
         }
@@ -1155,6 +1193,7 @@ impl Engine {
         self.current_state_id = 0;
         self.snapshot_len = 0;
         self.english_bypass = false;
+        self.replay_pending = false;
         self.dfa_detached = false;
     }
 
@@ -1311,6 +1350,7 @@ impl Engine {
     }
 
     fn undo_last_key_impl(&mut self, tone_refresh: ToneRefresh) {
+        self.replay_if_pending();
         if self.pop_snapshot().is_none() {
             return;
         }
@@ -1332,6 +1372,7 @@ impl Engine {
     /// No-op if the composition is empty. Invalidates the keystroke snapshot stack
     /// and the DFA fast-path state.
     pub fn remove_last_output_char(&mut self) {
+        self.replay_if_pending();
         let last = self
             .active_slice()
             .iter()
@@ -1394,6 +1435,7 @@ impl Engine {
         self.current_state_id = 0;
         self.snapshot_len = 0;
         self.english_bypass = false;
+        self.replay_pending = false;
         self.dfa_detached = false;
     }
 
