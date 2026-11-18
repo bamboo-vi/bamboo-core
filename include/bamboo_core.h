@@ -70,6 +70,7 @@ enum BambooConfigFlags {
     BAMBOO_CONFIG_BRACKET_NON_START = 1 << 5,
     BAMBOO_CONFIG_BRACKET_EVERYWHERE = 1 << 6,
     BAMBOO_CONFIG_NO_EXTENDED_ONSETS = 1 << 7,
+    BAMBOO_CONFIG_EXTENDED_FINALS = 1 << 8,
 };
 
 BAMBOO_DEPRECATED("use BambooEngine instances; planned removal in 1.0.0") void bamboo_setup(void);

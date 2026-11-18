@@ -383,6 +383,7 @@ pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
 ///     * 0x20: `[ ] { }` type `ơ ư Ơ Ư` except at the start of a word
 ///     * 0x40: `[ ] { }` always type `ơ ư Ơ Ư` (wins over 0x20)
 ///     * 0x80: `f`, `j` and `w` are not onsets (`z` still is)
+///     * 0x100: `g`, `k`, `nk` and `h` are finals, read as `ng`, `c`, `nh` and `nh`
 ///
 ///   [`bamboo_engine_new`] uses `0x07`.
 ///
@@ -774,6 +775,8 @@ mod tests {
         assert_eq!(typed(0x07 | 0x20, "m[f"), "mờ");
         assert_eq!(typed(0x07, "jaayj"), "jậy");
         assert_eq!(typed(0x07 | 0x80, "jaayj"), "jaayj");
+        assert_eq!(typed(0x07, "nhuwgx"), "nhuwgx");
+        assert_eq!(typed(0x07 | 0x100, "nhuwgx"), "nhữg");
     }
 
     #[test]

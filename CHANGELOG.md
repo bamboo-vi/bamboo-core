@@ -12,10 +12,15 @@ All notable changes to this project will be documented in this file.
   auto-correct is on.
 - Config flag bit `0x80` (`BAMBOO_CONFIG_NO_EXTENDED_ONSETS` in the C header) turns it off. Flags
   saved before this release lack the bit and keep the 0.5.5 behavior.
+- `Config::extended_finals` (builder: `extended_finals`) accepts `g`, `k`, `nk`, and `h` as
+  finals, checked as `ng`, `c`, `nh`, and `nh` (`nhữg`, `khók`, `mìnk`), so a tone lands whether
+  it is typed before or after them. It defaults to `false`; flag bit `0x100`
+  (`BAMBOO_CONFIG_EXTENDED_FINALS`) turns it on. With it on, English words ending in these finals
+  may change, e.g. `book` -> `bôk`.
 
 ### Breaking
 
-- `Config` has a new public field, so code that builds it with a struct literal listing every
+- `Config` has new public fields, so code that builds it with a struct literal listing every
   field no longer compiles. Add `..Default::default()` or use `Config::builder()`. Planned for
   0.6.0.
 

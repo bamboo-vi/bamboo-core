@@ -94,9 +94,9 @@ fn find_root_target(composition: &[Transformation], mut target: u8) -> u8 {
 pub(crate) fn is_valid(
     composition: &[Transformation],
     input_is_full_complete: bool,
-    extended_onsets: bool,
+    config: Config,
 ) -> bool {
-    check_validity(composition, input_is_full_complete, extended_onsets).0
+    check_validity(composition, input_is_full_complete, config).0
 }
 
 /// Validity plus the tone-check breakdown, when a tone transformation is
@@ -105,7 +105,7 @@ pub(crate) fn is_valid(
 pub(crate) fn check_validity(
     composition: &[Transformation],
     input_is_full_complete: bool,
-    extended_onsets: bool,
+    config: Config,
 ) -> (bool, Option<Cvc>) {
     let tone = composition.iter().rev().find(|t| t.effect_type == EffectType::ToneTransformation);
     if composition.len() <= 1 {
@@ -124,7 +124,7 @@ pub(crate) fn check_validity(
         tone_cvc = Some(cvc);
     }
 
-    (spell_check(composition, input_is_full_complete, extended_onsets), tone_cvc)
+    (spell_check(composition, input_is_full_complete, config), tone_cvc)
 }
 
 /// `f`, `j` and `w` are onsets only in typing spellings (`fải`, `jậy`, `wá`).
@@ -132,11 +132,25 @@ const fn onset_allowed(onset: char, extended_onsets: bool) -> bool {
     extended_onsets || !matches!(onset, 'f' | 'j' | 'w')
 }
 
+/// Teen code finals are checked as the finals they stand for (`nhữg` as `những`, `mìnk` as
+/// `mình`), so a tone lands the same way in either order.
+const fn standard_final(final_chars: &[char], config: Config) -> &[char] {
+    if !config.extended_finals {
+        return final_chars;
+    }
+    match final_chars {
+        ['g'] => &['n', 'g'],
+        ['k'] => &['c'],
+        ['n', 'k'] | ['h'] => &['n', 'h'],
+        _ => final_chars,
+    }
+}
+
 // spell checking (fast path: no heap for engine's bounded composition)
 fn spell_check(
     composition: &[Transformation],
     input_is_full_complete: bool,
-    extended_onsets: bool,
+    config: Config,
 ) -> bool {
     if composition.len() <= MAX_ACTIVE_TRANS {
         let mut app_abs = [0usize; MAX_ACTIVE_TRANS];
@@ -188,7 +202,7 @@ fn spell_check(
             fc_chars[i] = lower(add_tone_to_char(resolved[abs], 0));
         }
         if let [onset] = fc_chars[..fc_idxs.len()]
-            && !onset_allowed(onset, extended_onsets)
+            && !onset_allowed(onset, config.extended_onsets)
         {
             return false;
         }
@@ -202,7 +216,7 @@ fn spell_check(
         return is_valid_cvc_chars(
             &fc_chars[..fc_idxs.len()],
             &vo_chars[..vo_idxs.len()],
-            &lc_chars[..lc_idxs.len()],
+            standard_final(&lc_chars[..lc_idxs.len()], config),
             input_is_full_complete,
         );
     }
@@ -213,16 +227,13 @@ fn spell_check(
     let fc = flatten_slice(cvc.fc_slice(), flatten_mode);
     let mut fc_chars = fc.chars();
     if let (Some(onset), None) = (fc_chars.next(), fc_chars.next())
-        && !onset_allowed(onset, extended_onsets)
+        && !onset_allowed(onset, config.extended_onsets)
     {
         return false;
     }
-    is_valid_cvc(
-        &fc,
-        &flatten_slice(cvc.vo_slice(), flatten_mode),
-        &flatten_slice(cvc.lc_slice(), flatten_mode),
-        input_is_full_complete,
-    )
+    let lc: Vec<char> = flatten_slice(cvc.lc_slice(), flatten_mode).chars().collect();
+    let lc: String = standard_final(&lc, config).iter().collect();
+    is_valid_cvc(&fc, &flatten_slice(cvc.vo_slice(), flatten_mode), &lc, input_is_full_complete)
 }
 
 /// Represents the broken-down parts of a Vietnamese syllable (Consonant-Vowel-Consonant).
@@ -635,7 +646,7 @@ impl SyllHint {
 pub(crate) fn last_syllable_start(
     composition: &[Transformation],
     hint: SyllHint,
-    extended_onsets: bool,
+    config: Config,
 ) -> (usize, SyllHint) {
     let len = composition.len();
     // Resume: the stored prefix is identical (hash match), the composition
@@ -669,7 +680,7 @@ pub(crate) fn last_syllable_start(
             if end + 1 - start <= 1 {
                 continue;
             }
-            if !is_valid_from(composition, start, end + 1, extended_onsets) {
+            if !is_valid_from(composition, start, end + 1, config) {
                 start = end;
             }
         }
@@ -679,7 +690,7 @@ pub(crate) fn last_syllable_start(
     let (previous, _) = extract_last_word(composition, None);
     let mut start = previous.len();
     for end in start + 1..len {
-        if !is_valid_from(composition, start, end + 1, extended_onsets) {
+        if !is_valid_from(composition, start, end + 1, config) {
             start = end;
         }
     }
@@ -714,12 +725,7 @@ fn pull_effects_back(composition: &[Transformation], mut start: usize) -> usize 
 }
 
 /// `is_valid` on `composition[start..end]`, ignoring effects on letters before `start`.
-fn is_valid_from(
-    composition: &[Transformation],
-    start: usize,
-    end: usize,
-    extended_onsets: bool,
-) -> bool {
+fn is_valid_from(composition: &[Transformation], start: usize, end: usize, config: Config) -> bool {
     let mut part = TransformationStack::new();
     part.extend_from_slice(&composition[start..end]);
     for t in part.as_mut_slice() {
@@ -729,7 +735,7 @@ fn is_valid_from(
             t.set_target(Some(if outside { MAX_ACTIVE_TRANS as u8 } else { target - start as u8 }));
         }
     }
-    is_valid(part.as_slice(), false, extended_onsets)
+    is_valid(part.as_slice(), false, config)
 }
 
 fn is_effective(composition: &[Transformation], target_idx: usize, new_rule: &Rule) -> bool {
@@ -790,7 +796,7 @@ fn find_mark_target_excluding(
     composition: &[Transformation],
     rules: &[Rule],
     exclude_target: Option<u8>,
-    extended_onsets: bool,
+    config: Config,
 ) -> (Option<u8>, Option<Rule>) {
     for (idx, trans) in composition.iter().enumerate().rev() {
         for rule in rules {
@@ -815,7 +821,7 @@ fn find_mark_target_excluding(
             tmp.extend_from_slice(composition);
             tmp.push(Transformation::from_rule(*rule, Some(target), false));
 
-            if rule.get_mark() == Mark::Dash || is_valid(tmp.as_slice(), false, extended_onsets) {
+            if rule.get_mark() == Mark::Dash || is_valid(tmp.as_slice(), false, config) {
                 return (Some(target), Some(*rule));
             }
         }
@@ -881,12 +887,7 @@ pub(crate) fn find_target_excluding(
         }
     }
 
-    find_mark_target_excluding(
-        composition,
-        applicable_rules,
-        exclude_target,
-        config.extended_onsets,
-    )
+    find_mark_target_excluding(composition, applicable_rules, exclude_target, config)
 }
 
 fn generate_undo_transformations(
@@ -1117,7 +1118,7 @@ pub(crate) fn generate_transformations(
             // Only spread the mark when the syllable is incomplete without it:
             // "khuơ" stays as typed, while "huơu" needs the second horn.
             // `new_comp` is a new revision, so it gets its own split.
-            if !is_valid(new_comp.as_slice(), true, config.extended_onsets)
+            if !is_valid(new_comp.as_slice(), true, config)
                 && let (Some(target2), Some(mut virtual_rule)) = {
                     let new_cvc = extract_cvc_trans(new_comp.as_slice());
                     find_target(new_comp.as_slice(), applicable_rules, config, &new_cvc)
@@ -1452,12 +1453,13 @@ mod tests {
             // Incremental typing with real chained hints.
             let mut hint = SyllHint::NONE;
             for end in 1..=comp.len() {
-                let (full, _) = last_syllable_start(&comp[..end], SyllHint::NONE, true);
-                let (resumed, next) = last_syllable_start(&comp[..end], hint, true);
+                let (full, _) =
+                    last_syllable_start(&comp[..end], SyllHint::NONE, Config::default());
+                let (resumed, next) = last_syllable_start(&comp[..end], hint, Config::default());
                 assert_eq!(resumed, full, "chained resume diverged for {comp:?}[..{end}]");
                 hint = next;
             }
-            let (full, _) = last_syllable_start(&comp, SyllHint::NONE, true);
+            let (full, _) = last_syllable_start(&comp, SyllHint::NONE, Config::default());
             // Adversarial hints must fall back to the same result.
             for _ in 0..4 {
                 let flag = rng_next(&mut state);
@@ -1467,7 +1469,7 @@ mod tests {
                     start: (rng_next(&mut state) % 20) as u8,
                     valid: flag.is_multiple_of(2),
                 };
-                let (resumed, _) = last_syllable_start(&comp, evil, true);
+                let (resumed, _) = last_syllable_start(&comp, evil, Config::default());
                 assert_eq!(resumed, full, "evil hint {evil:?} diverged for {comp:?}");
             }
         }
@@ -1528,8 +1530,8 @@ mod tests {
                         engine.process_key(k, Mode::Vietnamese);
                     }
                     let comp = engine.active_slice();
-                    let (resumed, next) = last_syllable_start(comp, hint, true);
-                    let (fresh, _) = last_syllable_start(comp, SyllHint::NONE, true);
+                    let (resumed, next) = last_syllable_start(comp, hint, Config::default());
+                    let (fresh, _) = last_syllable_start(comp, SyllHint::NONE, Config::default());
                     assert_eq!(resumed, fresh, "hint diverged on {seq}");
                     hint = next;
                 }
