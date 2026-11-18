@@ -9,7 +9,80 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 ## Features
 
 - **Telex, VNI, VIQR** input methods with custom input method support
-- **Extended phonetic onsets**: accepts `f`, `j`, and `w` as initial consonants alongside `z`
+- **Extended phonetic onsets**: accepts `f`, `j`, and `w` as initial consonants alongside `z`,
+  switchable per app via `Config::extended_onsets` (on by default)
+- **Extended finals** (opt-in): `g`, `k`, `nk`, `h` checked as `ng`, `c`, `nh`, `nh` via
+  `Config::extended_finals`
+- **Forced word boundary signal**: `EditDelta::committed` / `just_committed()` tell the host when
+  the transformation buffer fills mid-word, so no text is lost
+
+## What's new in 0.6.0 (compared to 0.5.x)
+
+### The `f`, `j`, `w` onsets can be turned off (`Config::extended_onsets`)
+
+0.5.x always accepts the extended phonetic onsets; 0.6.0 keeps that as the default and adds a
+switch. With `extended_onsets = false` the keys stay literal, so words such as `just` and
+`ferry` survive auto-correct. `z` is accepted either way.
+
+| Method | Keys | 0.5.x · 0.6.0 default | `extended_onsets = false` |
+|---|---|---|---|
+| Telex | `jaayj` | `jậy` | `jaayj` |
+| Telex | `just` | `jút` | `just` |
+| VNI | `ja65` | `jậ` | `ja65` |
+| VIQR | `ja^.` | `jậ` | `ja^.` |
+
+C API: flag bit `0x80` (`BAMBOO_CONFIG_NO_EXTENDED_ONSETS`) turns the onsets off; flags saved
+before 0.6.0 lack the bit and keep the 0.5.x behavior.
+
+### Extended finals (`Config::extended_finals`, opt-in)
+
+New in 0.6.0 and off by default: `g`, `k`, `nk`, `h` stand in for the finals `ng`, `c`, `nh`,
+`nh`, so a tone lands the same whether it is typed before or after the final:
+
+| Method | Keys | 0.5.x · 0.6.0 default | `extended_finals = true` |
+|---|---|---|---|
+| Telex | `nhuwgx` or `nhuwxg` | kept as typed | `nhữg` |
+| Telex | `khoks` or `khosk` | kept as typed | `khók` |
+| Telex | `minkf` or `mifnk` | kept as typed | `mìnk` |
+| VNI | `nhu7g4` or `nhu74g` | kept as typed | `nhữg` |
+| VNI | `khok1` or `kho1k` | kept as typed | `khók` |
+| VNI | `mink2` or `mi2nk` | kept as typed | `mìnk` |
+| VIQR | `nhu+g~` or `nhu+~g` | kept as typed | `nhữg` |
+| VIQR | `khok'` or `kho'k` | kept as typed | `khók` |
+
+The finals are checked as the standard ones, not added to the spelling: `trigj` stays `trigj`
+(`ing` is not a rime). English words ending in these finals may change, e.g. `book` -> `bôk`.
+C API: flag bit `0x100` (`BAMBOO_CONFIG_EXTENDED_FINALS`) turns it on.
+
+### Changing the config mid-word (`set_config`)
+
+0.5.x kept hint and bypass state from the old config mid-word. 0.6.0 re-types the keys of the
+active word under the new config on the next edit, as if a new engine with the new config had
+typed them (VNI: `ja6`, turn `extended_onsets` off, `5` gives `ja65`):
+
+| Scenario (Telex) | 0.5.x | 0.6.0 |
+|---|---|---|
+| auto-correct off: `fac`, turn `extended_onsets` off, `s` | `facs` | `fác` |
+| `jaa`, turn `extended_onsets` on, `restore_last_word_as(Vietnamese)`, `s` | `jâs` | `jấ` |
+| `undo_last_key()` right after the change | nothing | undoes the last key |
+
+Compositions that cannot be re-typed faithfully (rebuilt text, English-mode keys, a re-type
+that would commit mid-word, or a next key that ends the word) are kept as they are; see the
+`set_config` documentation.
+
+### Buffer overflow is a signaled word boundary (issue #41)
+
+0.5.x silently reset the composition when the 32-slot transformation buffer filled mid-word;
+delta-based hosts rendered that as deleting dozens of already-committed characters. 0.6.0
+finishes the composition as a word, starts a new one with the current key, and tells the host
+through `EditDelta::committed` / `Engine::just_committed()` (see "Delta Updates for Text
+Editors").
+
+### Also fixed in 0.6.0
+
+- `process_key_edit` after `commit`, `undo_last_key`, `remove_last_output_char`,
+  `restore_last_word_as` or `rebuild_from_text` now diffs against the current preedit (0.5.x
+  hosts deleted text they should keep).
 - **Hybrid engine**: Rule-based transformations + Lazy JIT DFA caching
 - **SWAR / Vectorized matching**: Branchless 8-byte word lookups for transition routing
 - **Parallel batch processing**: Rayon-powered work-stealing for bulk text processing (`parallel` feature)
@@ -23,7 +96,7 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 
 ```toml
 [dependencies]
-bamboo-core = "0.5.5"
+bamboo-core = "0.6.0"
 ```
 
 ### Legacy Charset Conversion (0.5.1)
@@ -69,6 +142,19 @@ for removal in 1.0.0.
 
 Boolean configuration switches such as `auto_correct(bool)` and `free_tone_marking(bool)`
 remain unchanged because they express ordinary enabled/disabled state.
+
+### Migration Notes from 0.5.x (0.6.0 is breaking)
+
+`Config` and `EditDelta` gained public fields, so struct literals listing every field no longer
+compile. Add `..Default::default()`, use `Config::builder()`, or fill the new fields:
+
+- `Config::extended_onsets` (default `true`) — set it to `false` to keep `f`, `j`, `w` literal.
+- `Config::extended_finals` (default `false`).
+- `EditDelta::committed` — see "Delta Updates for Text Editors" above.
+
+Mid-word `set_config` re-types the active word under the new config on the next edit (see
+"What's new in 0.6.0" above); `EditDelta` hosts should also read "Delta Updates for Text
+Editors" below.
 
 ## C and C++ integration
 
@@ -238,25 +324,26 @@ assert_eq!(engine.get_processed_str(OutputOptions::FULL_TEXT), "Trăng");
 
 ## Performance & Benchmarks
 
-Bamboo Core is architected for zero heap allocations in the interactive typing loop, sub-microsecond keystroke latency, and high CPU cache efficiency via L1 cache line packing and SWAR vector matching. In `v0.5.4`, the `Engine` footprint is 1096 B (hot-first field layout, 32-transformation window, no persisted scratch stacks, lazy DFA arenas, 8-byte snapshots), with an L1-resident working set well under 4 KB per keystroke; DFA states are 64 B single-cache-line (popcount-rank transitions, no key array).
+Bamboo Core is architected for zero heap allocations in the interactive typing loop, sub-microsecond keystroke latency, and high CPU cache efficiency via L1 cache line packing and SWAR vector matching. In `v0.6.0`, the `Engine` footprint is 1104 B (hot-first field layout, 32-transformation window, no persisted scratch stacks, lazy DFA arenas, 8-byte snapshots), with an L1-resident working set well under 4 KB per keystroke; DFA states are 64 B single-cache-line (popcount-rank transitions, no key array).
 
-| Benchmark Scenario | Bamboo Core `0.5.4` | Uvie `2.8.1` | Bamboo/Uvie |
+`0.6.0` compared with `0.5.5` on the same machine and the same benches
+(`benches/criterion_bench.rs`), default config — `extended_finals` off, `extended_onsets` on,
+the same behavior as 0.5.5. Each cell shows the medians of two interleaved rounds:
+
+| Scenario | `0.5.5` | `0.6.0` | Change |
 |---|---:|---:|---:|
-| Feed single word (`tieengs`) | 199.8 ns | 776.4 ns | 0.26× |
-| Feed no warmup (DFA miss) | 6.044 µs | 1.013 µs | 5.97× |
-| Feed + delta (`tieengs`) | 263.8 ns | 807.1 ns | 0.33× |
-| Backspace (`tieengs`) | 218.6 ns | 997.8 ns | 0.22× |
-| Backspace x3 | 245.5 ns | 1.389 µs | 0.18× |
-| Mixed typing (32 chars) | 977.3 ns | 3.413 µs | 0.29× |
-| Many words (13 words + spaces) | 2.445 µs | 10.305 µs | 0.24× |
-| English passthrough (code) | 144.3 ns | 1.311 µs | 0.11× |
-| Long identifier (39 chars) | 334.0 ns | 11.279 µs | 0.03× |
-| Backspace spam (7x) | 287.1 ns | 1.584 µs | 0.18× |
-| Commit via space | 211.2 ns | 502.6 ns | 0.42× |
-| Worst-case syllable (`nghieeng`) | 121.3 ns | 664.3 ns | 0.18× |
-| Random typing (real workload) | 4.432 µs | 8.105 µs | 0.55× |
+| Warm typing `tieengs` (7 keys, DFA hit) | 109.4 / 107.9 ns | 110.8 / 111.3 ns | +2% |
+| Cold word `nghieeng` (8 keys, rule path + JIT) | 5.79 / 5.79 µs | 5.84 / 5.78 µs | ~0% |
+| Delta API `vieetj` (6 keys, `process_key_edit`) | 145.9 / 145.4 ns | 162.6 / 157.1 ns | +10% |
+| Type `tieengs` + one `undo_last_key` | 126.9 / 126.0 ns | 130.7 / 130.2 ns | +3% |
+| English passthrough `getUserNameByIdentifier` | 98.4 / 97.7 ns | 102.4 / 101.9 ns | +4% |
+| Sentence (62 chars) | 1.518 / 1.510 µs | 1.554 / 1.550 µs | +2% |
 
-*Benchmarks from `benches/engine_bench.rs`, medians of 3 runs of 500,000 iterations each, on x86_64 Linux with an AMD Ryzen 7 H 255 and Rust 1.98.0, using the Fat LTO bench profile. Ratios are Bamboo Core time divided by Uvie time; lower than 1 means Bamboo Core is faster. Each `op` is one full workload iteration, not one keystroke.*
+*Criterion with `--warm-up-time 1 --measurement-time 3`, the two versions run in interleaved
+rounds, on x86_64 Linux with an AMD Ryzen 7 H 255 and Rust 1.98.0, using the Fat LTO bench
+profile. "Change" is the ratio of the two-round averages. 0.6.0 adds the per-key config checks
+and the word-boundary bookkeeping behind `EditDelta::committed`; the cost stays in the low
+nanoseconds per keystroke and warm typing keeps ~16 ns/key.*
 
 > **Note for developers:** bench binaries run a fast smoke under `cargo test --all-targets`; the full suites (including multi-minute EXTREME memory profiles) run only under `cargo bench`. Per-keystroke polling loops should prefer `get_processed_str_cow` over `get_processed_str` to borrow cached output instead of allocating.
 

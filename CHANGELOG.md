@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-18
+
 ### Added
 
 - `Config::extended_onsets` (builder: `extended_onsets`) turns the `f`, `j`, and `w` onsets from
