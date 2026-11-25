@@ -52,6 +52,9 @@ const fn is_valid_vc(vo_mask: u16, lc_mask: u16) -> bool {
     (VC_OK[(vo_mask & 0xFF) as usize] & lc_mask) != 0
 }
 
+/// Mask of the vowel row holding `uơ` alone ([`super::tables::VO_4`]).
+const UO_HORN_ROW: u16 = 1 << 4;
+
 const fn is_valid_cv(fc_mask: u16, vo_mask: u16) -> bool {
     (CV_OK[(fc_mask & 0x1F) as usize] & vo_mask) != 0
 }
@@ -125,6 +128,10 @@ pub fn is_valid_cvc_chars(fc: &[char], vo: &[char], lc: &[char], full: bool) -> 
     }
 
     if fc_mask != 0 && !is_valid_cv(fc_mask, vo_mask) {
+        return false;
+    }
+    // Without an onset, `uơ` only ever leads to `ươ` (`ước`), so it never stands.
+    if fc.is_empty() && vo_mask == UO_HORN_ROW {
         return false;
     }
 

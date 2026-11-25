@@ -19,7 +19,9 @@
   đầu, nên định danh như `getUserNameByIdentifier` không còn bị cắt preedit. Từ 0.6.0, ranh giới
   chỉ xảy ra khi transformation của phím không vừa slot còn lại và được báo cho host qua
   `EditDelta::committed` / `Engine::just_committed()` thay vì reset ngầm (issue #41).
-- **Horn `uow`:** từ 0.4.1, `duow` tạo `dươ` trong đúng lớp onset; `khuow` vẫn tạo `khuơ`.
+- **Horn `uow`:** từ 0.4.1, `duow` tạo `dươ` trong đúng lớp onset; `khuow` vẫn tạo `khuơ`. Sau 0.6.0,
+  `cuow`, `kuow` và `uow` (VNI `uo7`) cũng tạo `ươ` ngay, khác `cvMatrix` của Go (#47); `uơ` chỉ
+  còn sau `h kh qu th` (`thuở`, `huơ`, `khuơ`).
 - **camelCase không có khoảng trắng:** với `auto_correct=true`, core chủ động trả về keystroke
   thô khi phần nối không còn là tiền tố tiếng Việt hợp lệ. Đây là chính sách kiểm tra chính tả,
   không phải lỗi mất preedit. Với `auto_correct=false`, `VieetjNam` cho `ViệtNam`; addon Ngó

@@ -10,20 +10,29 @@ fn check(im: InputMethod, cases: &[(&str, &str)]) {
 
 #[test]
 fn telex_horn_on_o_when_nothing_follows_uo() {
-    // `uow` types the documented Telex diphthong step `uơ` (as in `truowng`
-    // -> `trương`): the horn lands on the nearest vowel `o`, and a following
+    // After `h kh qu th`, `uow` types the Telex diphthong step `uơ` (as in
+    // `thuowng` -> `thương`): the horn lands on the nearest vowel `o`, and a following
     // coda still resolves it (`uowng` -> `ương`). A mid-word preedit is not
     // judged by dictionary rimes (`uơ` is no standalone word, but neither is
     // any other unfinished preedit); what matters is that completed words
     // come out right (`truowcs` -> `trước`, see the vi/uvie suite).
-    check(InputMethod::telex(), &[("khuow", "khuơ"), ("uowr", "uở")]);
+    check(InputMethod::telex(), &[("khuow", "khuơ"), ("thuow", "thuơ"), ("huow", "huơ")]);
+}
+
+#[test]
+fn uow_spreads_both_horns_after_c_k_and_no_onset() {
+    // `uơ` only ends real words after `h kh qu th` (`thuở`, `huơ`, `khuơ`); after `c`, `k` or
+    // no onset it is always the first step of `ươ` (`cước`, `ước`), so both horns go on at once
+    // instead of changing the shown text at the next key.
+    check(InputMethod::telex(), &[("cuow", "cươ"), ("kuow", "kươ"), ("uow", "ươ"), ("uowr", "ưở")]);
+    check(InputMethod::vni(), &[("cuo7", "cươ"), ("uo7", "ươ"), ("uo73", "ưở")]);
 }
 
 #[test]
 fn telex_uow_spreads_both_horns_for_onsets_that_forbid_uơ() {
-    // Go's cvMatrix allows the rime `uơ` only after the `c h k kh qu th`
-    // onset class, so `khuơ` is complete and keeps one horn, while `duơ` is
-    // incomplete and spreads the second horn (`dươ`) — matching Go bamboo-core.
+    // The rime `uơ` stands only after the `h kh qu th` onset class, so `khuơ`
+    // keeps one horn, while `duơ` is incomplete and spreads the second horn
+    // (`dươ`) — matching Go bamboo-core.
     check(
         InputMethod::telex(),
         &[("duow", "dươ"), ("dduow", "đươ"), ("tuow", "tươ"), ("nguow", "ngươ")],
@@ -52,7 +61,7 @@ fn telex_uow_shortcut_still_works() {
 
 #[test]
 fn vni_horn_placement_after_uo() {
-    check(InputMethod::vni(), &[("khuo7", "khuơ"), ("uo73", "uở"), ("huou7", "hươu")]);
+    check(InputMethod::vni(), &[("khuo7", "khuơ"), ("huou7", "hươu")]);
 }
 
 #[test]

@@ -24,14 +24,16 @@ pub(crate) type Token = ([char; 4], u8);
 // bit per matching row and `CV_ALLOWED_MASKS` unions their rime allowances.
 // `kr` is a bamboo extension (loanword onset); `f`, `j`, `w`, and `z` are also
 // accepted here for phonetic/typing spellings.
-pub(crate) static FC_0: [Token; 20] = [
+pub(crate) static FC_0: [Token; 22] = [
     (['b', '\0', '\0', '\0'], 1),
+    (['c', '\0', '\0', '\0'], 1),
     (['d', '\0', '\0', '\0'], 1),
     (['đ', '\0', '\0', '\0'], 1),
     (['f', '\0', '\0', '\0'], 1),
     (['g', '\0', '\0', '\0'], 1),
     (['g', 'h', '\0', '\0'], 2),
     (['j', '\0', '\0', '\0'], 1),
+    (['k', '\0', '\0', '\0'], 1),
     (['k', 'r', '\0', '\0'], 2),
     (['m', '\0', '\0', '\0'], 1),
     (['n', '\0', '\0', '\0'], 1),
@@ -46,10 +48,8 @@ pub(crate) static FC_0: [Token; 20] = [
     (['w', '\0', '\0', '\0'], 1),
     (['z', '\0', '\0', '\0'], 1),
 ];
-pub(crate) static FC_1: [Token; 6] = [
-    (['c', '\0', '\0', '\0'], 1),
+pub(crate) static FC_1: [Token; 4] = [
     (['h', '\0', '\0', '\0'], 1),
-    (['k', '\0', '\0', '\0'], 1),
     (['k', 'h', '\0', '\0'], 2),
     (['q', 'u', '\0', '\0'], 2),
     (['t', 'h', '\0', '\0'], 2),
@@ -171,15 +171,16 @@ pub(crate) const VC_ALLOWED_MASKS: [u16; 8] = [
 ];
 
 /// Which vowel rows each onset class may pair with — Go bamboo-core's
-/// `cvMatrix`, row-for-row with the [`FC_0`]..[`FC_4`] classes, with one
-/// deliberate extension: class 0 also takes row 3 (`oă`) so real syllables
+/// `cvMatrix`, row-for-row with the [`FC_0`]..[`FC_4`] classes, with two
+/// deliberate divergences. Class 0 also takes row 3 (`oă`) so real syllables
 /// like `boặm`, `toắt`, `nhoằng` stay valid (commit `1dffe18` — pairing an
 /// onset with a vowel is free in Vietnamese).
 ///
 /// The operative constraint is row 4 (`uơ`): legal only after class 1
-/// (`c h k kh qu th`). `uơ` is the Telex intermediate of the `uow` shortcut,
-/// not a standalone rime — so `duơ` is incomplete (its second horn spreads to
-/// `dươ`) while `khuơ` stands and bare `uơ` (`uowr` → `uở`) keeps one horn.
+/// (`h kh qu th`), the onsets of the words that end in it (`thuở`, `huơ`,
+/// `khuơ`). Go also puts `c` and `k` in class 1; here they sit in class 0, and
+/// `uơ` without an onset is refused in `is_valid_cvc_chars`, so `cuow` and
+/// `uow` show `ươ` at once instead of changing at the next key.
 /// Partial inputs stay valid through the union check (e.g. bare `u` matches
 /// rows 2/4/6 and validates via row 2).
 pub(crate) const CV_ALLOWED_MASKS: [u16; 5] = [
