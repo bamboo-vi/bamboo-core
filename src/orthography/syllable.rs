@@ -380,7 +380,10 @@ fn find_tone_target(composition: &[Transformation], cvc: &Cvc, std_style: bool) 
         let raw_len = raw_keys_of(&app_vowels, &mut raw);
         let tone_on_second =
             raw_len == 2 && TONE_ON_SECOND.iter().any(|&[a, b]| raw[0] == a && raw[1] == b);
-        return Some(if tone_on_second { vo_abs[1] } else { vo_abs[0] });
+        // iê, uâ and yê take the tone on the marked vowel even before the coda: tiế, not tíê.
+        let second = add_tone_to_char(resolve_appended_char(composition, vo_abs[1] as usize), 0);
+        let marked_second = TONE_PREFERRED.contains(&second);
+        return Some(if tone_on_second || marked_second { vo_abs[1] } else { vo_abs[0] });
     }
 
     if appending_vowels_len == 3 {
