@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-26
+
 ### Changed
 
 - Telex `uow` (VNI `uo7`) after `c`, `k` or with no onset shows `ươ` at once instead of `uơ`

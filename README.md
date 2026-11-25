@@ -16,6 +16,19 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 - **Forced word boundary signal**: `EditDelta::committed` / `just_committed()` tell the host when
   the transformation buffer fills mid-word, so no text is lost
 
+## What's new in 0.6.1
+
+Two orthography fixes for the `ươ`/`uơ` rimes:
+
+- Telex `uow` (VNI `uo7`) after `c`, `k` or with no onset now shows `ươ` at once (`cuow` →
+  `cươ`, `uow` → `ươ`, `uowr` → `ưở`) instead of `uơ` that the next key changes. After
+  `h kh qu th` it stays `uơ` (`thuow` → `thuơ`, `thuowr` → `thuở`).
+- Telex `o` after a two-horn `ươ` now swaps it for `uô` (`ruowifo` → `ruồi`, `muownso` →
+  `muốn`, `chuowngo` → `chuông`) instead of falling back to raw keys. The same holds after a
+  `uw`-typed `ư` (`xuwoongs` → `xuống`).
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
+
 ## What's new in 0.6.0 (compared to 0.5.x)
 
 ### The `f`, `j`, `w` onsets can be turned off (`Config::extended_onsets`)
@@ -96,7 +109,7 @@ Editors").
 
 ```toml
 [dependencies]
-bamboo-core = "0.6.0"
+bamboo-core = "0.6.1"
 ```
 
 ### Legacy Charset Conversion (0.5.1)
