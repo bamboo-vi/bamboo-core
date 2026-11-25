@@ -54,3 +54,30 @@ fn telex_uow_shortcut_still_works() {
 fn vni_horn_placement_after_uo() {
     check(InputMethod::vni(), &[("khuo7", "khuơ"), ("uo73", "uở"), ("huou7", "hươu")]);
 }
+
+#[test]
+fn telex_o_turns_ươ_back_into_uô() {
+    // `o` after a two-horn `ươ` swaps it for `uô`, the same as after a
+    // directly typed `ưo`. Before, the key undid the horn on `o` and the
+    // word fell back to raw keys (`ruowifo`).
+    check(
+        InputMethod::telex(),
+        &[
+            ("ruowo", "ruô"),
+            ("ruowifo", "ruồi"),
+            ("ruowfio", "ruồi"),
+            ("muownso", "muốn"),
+            ("chuowngo", "chuông"),
+            ("tuowngo", "tuông"),
+        ],
+    );
+}
+
+#[test]
+fn telex_w_turns_uô_into_ươ() {
+    // The reverse swap already worked; keep it that way.
+    check(
+        InputMethod::telex(),
+        &[("ruooixw", "rưỡi"), ("tuoongw", "tương"), ("muoonsw", "mướn"), ("huowo", "huô")],
+    );
+}

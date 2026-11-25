@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Telex `o` after a two-horn `ươ` now swaps it for `uô` (`ruowifo` -> `ruồi`, `muownso` ->
+  `muốn`) instead of undoing the horn and falling back to raw keys. The same now holds after a
+  `uw`-typed `ư` (`xuwoongs` -> `xuống`).
+
 ## [0.6.0] - 2026-11-18
 
 ### Added
