@@ -9,10 +9,10 @@ fn typed(style: ToneStyle, keys: &str) -> String {
     engine.output().into_owned()
 }
 
-// The traditional style differs from the modern one only for oa, oe and uy.
+// ToneStyle::Traditional gives hoà, ToneStyle::Modern gives hòa; only oa, oe and uy differ.
 // A vowel with a circumflex or horn keeps the tone in both, before the coda is typed too.
 #[test]
-fn traditional_style_puts_the_tone_on_the_marked_second_vowel() {
+fn hoa_style_puts_the_tone_on_the_marked_second_vowel() {
     for (keys, want) in
         [("tiees", "tiế"), ("vieej", "việ"), ("chuaar", "chuẩ"), ("khuyeens", "khuyến")]
     {
@@ -22,7 +22,7 @@ fn traditional_style_puts_the_tone_on_the_marked_second_vowel() {
 }
 
 #[test]
-fn traditional_style_still_marks_oa_on_the_second_vowel() {
+fn hoa_style_still_marks_oa_on_the_second_vowel() {
     assert_eq!(typed(ToneStyle::Traditional, "hoaf"), "hoà");
     assert_eq!(typed(ToneStyle::Modern, "hoaf"), "hòa");
     assert_eq!(typed(ToneStyle::Traditional, "tias"), "tía");
