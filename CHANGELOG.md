@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Telex `uow` (VNI `uo7`) after `c`, `k` or with no onset shows `ươ` at once instead of `uơ`
+  that the next letter changes (`cuow` → `cươ`, `uow` → `ươ`, `uowr` → `ưở`). After `h kh qu th`
+  it stays `uơ` (`thuowr` → `thuở`). This departs from Go bamboo-core's `cvMatrix` (#47).
+
 ## [0.6.0] - 2026-11-18
 
 ### Added
