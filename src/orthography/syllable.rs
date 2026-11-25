@@ -1029,25 +1029,25 @@ pub(crate) fn uho_tail_match_composition(composition: &[Transformation]) -> bool
 
 /// Checks if composition contains "ưo" or "ươ" pattern directly from transformations,
 /// avoiding the expensive flatten + string search allocation.
+///
+/// Chars are resolved through their mark chain: `uow` stores a plain `u` and
+/// `o` plus two horn marks, and still counts as `ươ`.
 fn contains_uho_in_composition(composition: &[Transformation]) -> bool {
+    let is_app = |t: &Transformation| {
+        !t.has_target() && t.effect_type == EffectType::Appending && t.key != '\0'
+    };
     for i in 0..composition.len() {
-        let t = &composition[i];
-        if t.has_target() || t.effect_type != EffectType::Appending || t.key == '\0' {
+        if !is_app(&composition[i]) {
             continue;
         }
-        // Get the toneless result char.
-        let c = add_tone_to_char(t.result, 0);
-        if c == 'ư' {
-            // Look ahead for 'o' or 'ơ'.
-            for t2 in composition.iter().skip(i + 1) {
-                if t2.has_target() || t2.effect_type != EffectType::Appending || t2.key == '\0' {
-                    continue;
-                }
-                let c2 = add_tone_to_char(t2.result, 0);
-                if c2 == 'o' || c2 == 'ơ' {
-                    return true;
-                }
-                break; // Found next appending char, not o/ơ.
+        if lower(add_tone_to_char(resolve_appended_char(composition, i), 0)) != 'ư' {
+            continue;
+        }
+        // Look at the next appending char for 'o' or 'ơ'.
+        if let Some(j) = (i + 1..composition.len()).find(|&j| is_app(&composition[j])) {
+            let c2 = lower(add_tone_to_char(resolve_appended_char(composition, j), 0));
+            if c2 == 'o' || c2 == 'ơ' {
+                return true;
             }
         }
     }
