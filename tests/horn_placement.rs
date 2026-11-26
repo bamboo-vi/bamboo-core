@@ -90,3 +90,26 @@ fn telex_w_turns_uô_into_ươ() {
         &[("ruooixw", "rưỡi"), ("tuoongw", "tương"), ("muoonsw", "mướn"), ("huowo", "huô")],
     );
 }
+
+#[test]
+fn vni_6_turns_ươ_back_into_uô() {
+    check(
+        InputMethod::vni(),
+        &[
+            ("ruo76", "ruô"),
+            ("ruo7i26", "ruồi"),
+            ("ruo72i6", "ruồi"),
+            ("muo7n16", "muốn"),
+            ("chuo7ng6", "chuông"),
+            ("tuo7ng6", "tuông"),
+        ],
+    );
+}
+
+#[test]
+fn vni_7_turns_uô_into_ươ() {
+    check(
+        InputMethod::vni(),
+        &[("ruo6i47", "rưỡi"), ("tuo6ng7", "tương"), ("muo6n17", "mướn"), ("huo76", "huô")],
+    );
+}
